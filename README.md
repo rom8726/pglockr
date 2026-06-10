@@ -35,6 +35,19 @@ PGLOCKR_TOKEN="a-strong-token" \
 
 Then open http://localhost:8080 and enter the token.
 
+## Local test bench
+
+No database handy? [`dev/`](dev/README.md) ships a throwaway PostgreSQL plus load
+scripts that manufacture blocking trees:
+
+```sh
+cd dev
+make up           # start PostgreSQL on :55432
+make pglockr      # run pglockr against it (token: dev)
+make load-chain   # manufacture a 3-deep blocking tree
+make load-reset   # clear it
+```
+
 ## Database roles
 
 pglockr needs `pg_monitor` to read other backends' query texts and
