@@ -57,7 +57,7 @@ pglockr needs `pg_monitor` to read other backends' query texts and
 > Superuser backends cannot be cancelled/terminated via `pg_signal_backend`
 > (a PostgreSQL restriction); the UI surfaces this.
 
-## HTTP API (MVP subset)
+## HTTP API
 
 | Method | Path | Auth | Purpose |
 |--------|------|------|---------|
@@ -65,6 +65,8 @@ pglockr needs `pg_monitor` to read other backends' query texts and
 | GET  | `/api/clusters` | token | cluster + poll status |
 | GET  | `/api/snapshot?cluster=NAME[&at=RFC3339]` | token | current/nearest forest |
 | WS   | `/api/stream?cluster=NAME` | token | live snapshot stream |
+| GET  | `/api/locks?cluster=NAME` | token | lock inspector (raw `pg_locks`) |
+| GET  | `/api/hot-objects?cluster=NAME` | token | most contended relations |
 | POST | `/api/sessions/{pid}/cancel` | token | `pg_cancel_backend` |
 | POST | `/api/sessions/{pid}/terminate` | token | `pg_terminate_backend` |
 

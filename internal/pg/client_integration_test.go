@@ -154,6 +154,46 @@ func TestSnapshotBuildsForest(t *testing.T) {
 	if client.ServerVersionNum() == 0 {
 		t.Error("server version not detected")
 	}
+
+	// Lock inspector should report both A's held lock and B's pending lock on
+	// the test table.
+	locks, err := client.Locks(ctx)
+	if err != nil {
+		t.Fatalf("Locks: %v", err)
+	}
+	var sawHeld, sawWaiting bool
+	for _, l := range locks {
+		if l.Object != itTable {
+			continue
+		}
+		if l.PID == pidA && l.Granted {
+			sawHeld = true
+		}
+		if l.PID == pidB && !l.Granted {
+			sawWaiting = true
+		}
+	}
+	if !sawHeld || !sawWaiting {
+		t.Errorf("Locks missing rows for %s: held=%v waiting=%v", itTable, sawHeld, sawWaiting)
+	}
+
+	// Hot objects should list the contended table with at least one waiter.
+	hot, err := client.HotObjects(ctx)
+	if err != nil {
+		t.Fatalf("HotObjects: %v", err)
+	}
+	var found bool
+	for _, h := range hot {
+		if h.Object == itTable {
+			found = true
+			if h.Waiters < 1 || h.Holders < 1 {
+				t.Errorf("hot object %s: waiters=%d holders=%d, want >=1 each", itTable, h.Waiters, h.Holders)
+			}
+		}
+	}
+	if !found {
+		t.Errorf("hot objects missing %s: %+v", itTable, hot)
+	}
 }
 
 func blockedBy(snap graph.Snapshot, pid, blocker int) bool {

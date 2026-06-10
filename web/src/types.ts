@@ -41,6 +41,20 @@ export interface ActionResult {
   at: string;
 }
 
+export interface LockRow {
+  lockType: string;
+  object: string;
+  mode: string;
+  granted: boolean;
+  pid: number;
+}
+
+export interface HotObject {
+  object: string;
+  waiters: number;
+  holders: number;
+}
+
 // PostgreSQL's zero timestamp, used to detect unset time fields.
 export const ZERO_TIME = "0001-01-01T00:00:00Z";
 

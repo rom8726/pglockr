@@ -78,11 +78,119 @@ body {
   flex: 1;
 }
 
+/* Tabs */
+.tabs {
+  display: flex;
+  gap: 2px;
+}
+.tab {
+  background: none;
+  border: none;
+  border-bottom: 2px solid transparent;
+  color: var(--text-dim);
+  padding: 6px 10px;
+  font-size: 13px;
+  cursor: pointer;
+}
+.tab:hover {
+  color: var(--text);
+}
+.tab--active {
+  color: var(--text);
+  border-bottom-color: var(--accent);
+}
+
 /* Main layout */
 .main {
   flex: 1;
   display: flex;
   min-height: 0;
+}
+
+/* Tabular views (lock inspector, hot objects) */
+.tab-scroll {
+  flex: 1;
+  overflow: auto;
+  padding: 16px;
+}
+.tab-msg {
+  display: grid;
+  place-items: center;
+  flex: 1;
+  color: var(--text-dim);
+  font-size: 15px;
+}
+.tab-msg--err {
+  color: var(--danger);
+}
+.tbl {
+  width: 100%;
+  border-collapse: collapse;
+  font-size: 13px;
+}
+.tbl th {
+  text-align: left;
+  color: var(--text-dim);
+  font-weight: 600;
+  padding: 6px 10px;
+  border-bottom: 1px solid var(--border);
+  position: sticky;
+  top: 0;
+  background: var(--bg);
+}
+.tbl td {
+  padding: 5px 10px;
+  border-bottom: 1px solid var(--bg-elev2);
+}
+.tbl .num {
+  text-align: right;
+}
+.tbl .mono {
+  font-family: ui-monospace, monospace;
+}
+.tbl__dim {
+  color: var(--text-dim);
+}
+.tbl__group td {
+  background: var(--bg-elev);
+  font-weight: 600;
+  font-family: ui-monospace, monospace;
+  border-bottom: 1px solid var(--border);
+}
+.tbl__count {
+  color: var(--text-dim);
+  font-weight: 400;
+  font-family: ui-sans-serif, system-ui, sans-serif;
+  margin-left: 8px;
+  font-size: 12px;
+}
+.tbl__waiting td {
+  background: var(--warn-bg);
+}
+.pill {
+  font-size: 11px;
+  padding: 1px 7px;
+  border-radius: 999px;
+  border: 1px solid var(--border);
+}
+.pill--ok {
+  color: var(--ok);
+  border-color: var(--ok);
+}
+.pill--warn {
+  color: var(--warn);
+  border-color: var(--warn);
+}
+.bar {
+  height: 8px;
+  width: 160px;
+  background: var(--bg-elev2);
+  border-radius: 4px;
+  overflow: hidden;
+}
+.bar__fill {
+  height: 100%;
+  background: var(--danger);
 }
 .graph {
   flex: 1;
