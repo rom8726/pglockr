@@ -1,0 +1,18 @@
+# Example pglockr configuration. Secrets are NOT read from this file:
+#   PGLOCKR_DSN   — target database connection string (required)
+#   PGLOCKR_TOKEN — static access token for the UI/API (required)
+# Optional env overrides: PGLOCKR_HTTP_ADDR, PGLOCKR_CLUSTER
+#
+# Run: PGLOCKR_DSN=... PGLOCKR_TOKEN=... ./pglockr -config pglockr.yaml
+
+cluster:
+  name: default
+
+poll:
+  interval: 1s          # how often to snapshot the target
+  ringSize: 300         # in-memory snapshots retained (~5 min at 1s)
+  statementTimeout: 3s  # per-query timeout against the target
+  waitersOnly: false    # call pg_blocking_pids only for backends in lock-wait
+
+http:
+  addr: ":8080"
