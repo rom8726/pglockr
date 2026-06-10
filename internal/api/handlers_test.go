@@ -13,6 +13,7 @@ import (
 
 	"github.com/rom8726/pglockr/internal/auth"
 	"github.com/rom8726/pglockr/internal/graph"
+	"github.com/rom8726/pglockr/internal/pg"
 	"github.com/rom8726/pglockr/internal/poller"
 	"github.com/rom8726/pglockr/internal/signal"
 	"github.com/rom8726/pglockr/internal/store"
@@ -36,19 +37,33 @@ func (f *fakeSignaler) Terminate(_ context.Context, pid int) (bool, error) {
 	return f.delivered, nil
 }
 
+// fakeInspector returns canned lock views.
+type fakeInspector struct {
+	locks []pg.LockRow
+	hot   []pg.HotObject
+}
+
+func (f *fakeInspector) Locks(context.Context) ([]pg.LockRow, error)        { return f.locks, nil }
+func (f *fakeInspector) HotObjects(context.Context) ([]pg.HotObject, error) { return f.hot, nil }
+
 func newTestServer(t *testing.T, st *store.Store, sig signal.Signaler) http.Handler {
+	return newTestServerWith(t, st, sig, &fakeInspector{})
+}
+
+func newTestServerWith(t *testing.T, st *store.Store, sig signal.Signaler, insp Inspector) http.Handler {
 	t.Helper()
 	log := slog.New(slog.NewTextHandler(io.Discard, nil))
 	// A poller that never runs; we only read its Status().
 	p := poller.New("default", nil, st, time.Second, log)
 	srv := New(Config{
-		Cluster: "default",
-		Store:   st,
-		Poller:  p,
-		Signal:  signal.New(sig, nil, log),
-		Auth:    auth.New(testToken),
-		UI:      fstest.MapFS{"index.html": {Data: []byte("<html>ui</html>")}},
-		Log:     log,
+		Cluster:   "default",
+		Store:     st,
+		Poller:    p,
+		Signal:    signal.New(sig, nil, log),
+		Inspector: insp,
+		Auth:      auth.New(testToken),
+		UI:        fstest.MapFS{"index.html": {Data: []byte("<html>ui</html>")}},
+		Log:       log,
 	})
 	return srv.Handler()
 }
@@ -158,6 +173,56 @@ func TestActionRejectsCrossOrigin(t *testing.T) {
 	}
 	if len(sig.cancelled) != 0 {
 		t.Fatalf("cross-origin action must not reach the signaler")
+	}
+}
+
+func TestLocksEndpoint(t *testing.T) {
+	insp := &fakeInspector{locks: []pg.LockRow{
+		{LockType: "relation", Object: "accounts", Mode: "AccessExclusiveLock", Granted: true, PID: 10},
+		{LockType: "relation", Object: "accounts", Mode: "AccessShareLock", Granted: false, PID: 20},
+	}}
+	h := newTestServerWith(t, store.New(10), &fakeSignaler{}, insp)
+
+	rec := httptest.NewRecorder()
+	h.ServeHTTP(rec, authed(http.MethodGet, "/api/locks"))
+	if rec.Code != http.StatusOK {
+		t.Fatalf("got %d, want 200", rec.Code)
+	}
+	var got []pg.LockRow
+	if err := json.Unmarshal(rec.Body.Bytes(), &got); err != nil {
+		t.Fatalf("decode: %v", err)
+	}
+	if len(got) != 2 || got[0].Object != "accounts" || got[1].Granted {
+		t.Fatalf("unexpected locks payload: %+v", got)
+	}
+}
+
+func TestLocksRequiresAuth(t *testing.T) {
+	h := newTestServer(t, store.New(10), &fakeSignaler{})
+	rec := httptest.NewRecorder()
+	h.ServeHTTP(rec, httptest.NewRequest(http.MethodGet, "/api/locks", nil))
+	if rec.Code != http.StatusUnauthorized {
+		t.Fatalf("got %d, want 401", rec.Code)
+	}
+}
+
+func TestHotObjectsEndpoint(t *testing.T) {
+	insp := &fakeInspector{hot: []pg.HotObject{
+		{Object: "accounts", Waiters: 3, Holders: 1},
+	}}
+	h := newTestServerWith(t, store.New(10), &fakeSignaler{}, insp)
+
+	rec := httptest.NewRecorder()
+	h.ServeHTTP(rec, authed(http.MethodGet, "/api/hot-objects"))
+	if rec.Code != http.StatusOK {
+		t.Fatalf("got %d, want 200", rec.Code)
+	}
+	var got []pg.HotObject
+	if err := json.Unmarshal(rec.Body.Bytes(), &got); err != nil {
+		t.Fatalf("decode: %v", err)
+	}
+	if len(got) != 1 || got[0].Waiters != 3 {
+		t.Fatalf("unexpected hot-objects payload: %+v", got)
 	}
 }
 

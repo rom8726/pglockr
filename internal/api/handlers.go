@@ -61,6 +61,24 @@ func (s *Server) handleSnapshot(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, http.StatusOK, snap)
 }
 
+func (s *Server) handleLocks(w http.ResponseWriter, r *http.Request) {
+	rows, err := s.inspector.Locks(r.Context())
+	if err != nil {
+		http.Error(w, err.Error(), http.StatusBadGateway)
+		return
+	}
+	writeJSON(w, http.StatusOK, rows)
+}
+
+func (s *Server) handleHotObjects(w http.ResponseWriter, r *http.Request) {
+	objs, err := s.inspector.HotObjects(r.Context())
+	if err != nil {
+		http.Error(w, err.Error(), http.StatusBadGateway)
+		return
+	}
+	writeJSON(w, http.StatusOK, objs)
+}
+
 func (s *Server) handleCancel(w http.ResponseWriter, r *http.Request) {
 	s.doSignal(w, r, signal.ActionCancel)
 }

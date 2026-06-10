@@ -75,3 +75,30 @@ WHERE NOT w.granted
 
 // versionNumSQL returns server_version_num (e.g. 160004 for 16.4).
 const versionNumSQL = `SHOW server_version_num`
+
+// locksSQL is the lock inspector: raw pg_locks, object name resolved where
+// possible, ordered for grouping by object (spec 5.6).
+const locksSQL = `
+SELECT
+    l.locktype,
+    COALESCE(l.relation::regclass::text, l.locktype) AS object,
+    l.mode,
+    l.granted,
+    l.pid
+FROM pg_locks l
+WHERE l.pid IS NOT NULL
+  AND l.pid <> pg_backend_pid()
+ORDER BY object, l.granted DESC, l.mode`
+
+// hotObjectsSQL ranks the most contended relations: how many backends wait on
+// vs hold a lock on each (spec 5.7).
+const hotObjectsSQL = `
+SELECT
+    l.relation::regclass::text AS object,
+    count(*) FILTER (WHERE NOT l.granted) AS waiters,
+    count(*) FILTER (WHERE l.granted)     AS holders
+FROM pg_locks l
+WHERE l.relation IS NOT NULL
+GROUP BY object
+HAVING count(*) FILTER (WHERE NOT l.granted) > 0
+ORDER BY waiters DESC, holders DESC`

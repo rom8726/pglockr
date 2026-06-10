@@ -4,6 +4,7 @@
 package api
 
 import (
+	"context"
 	"io/fs"
 	"log/slog"
 	"net/http"
@@ -12,43 +13,54 @@ import (
 	"github.com/go-chi/chi/v5/middleware"
 
 	"github.com/rom8726/pglockr/internal/auth"
+	"github.com/rom8726/pglockr/internal/pg"
 	"github.com/rom8726/pglockr/internal/poller"
 	"github.com/rom8726/pglockr/internal/signal"
 	"github.com/rom8726/pglockr/internal/store"
 )
 
+// Inspector serves on-demand lock views (lock inspector, hot objects). It is
+// satisfied by *pg.Client.
+type Inspector interface {
+	Locks(ctx context.Context) ([]pg.LockRow, error)
+	HotObjects(ctx context.Context) ([]pg.HotObject, error)
+}
+
 // Server holds the dependencies for the HTTP handlers.
 type Server struct {
-	cluster string
-	store   *store.Store
-	poller  *poller.Poller
-	signal  *signal.Service
-	auth    *auth.Authenticator
-	ui      fs.FS
-	log     *slog.Logger
+	cluster   string
+	store     *store.Store
+	poller    *poller.Poller
+	signal    *signal.Service
+	inspector Inspector
+	auth      *auth.Authenticator
+	ui        fs.FS
+	log       *slog.Logger
 }
 
 // Config bundles the Server's dependencies.
 type Config struct {
-	Cluster string
-	Store   *store.Store
-	Poller  *poller.Poller
-	Signal  *signal.Service
-	Auth    *auth.Authenticator
-	UI      fs.FS
-	Log     *slog.Logger
+	Cluster   string
+	Store     *store.Store
+	Poller    *poller.Poller
+	Signal    *signal.Service
+	Inspector Inspector
+	Auth      *auth.Authenticator
+	UI        fs.FS
+	Log       *slog.Logger
 }
 
 // New builds a Server.
 func New(c Config) *Server {
 	return &Server{
-		cluster: c.Cluster,
-		store:   c.Store,
-		poller:  c.Poller,
-		signal:  c.Signal,
-		auth:    c.Auth,
-		ui:      c.UI,
-		log:     c.Log,
+		cluster:   c.Cluster,
+		store:     c.Store,
+		poller:    c.Poller,
+		signal:    c.Signal,
+		inspector: c.Inspector,
+		auth:      c.Auth,
+		ui:        c.UI,
+		log:       c.Log,
 	}
 }
 
@@ -68,6 +80,8 @@ func (s *Server) Handler() http.Handler {
 		api.Get("/clusters", s.handleClusters)
 		api.Get("/snapshot", s.handleSnapshot)
 		api.Get("/stream", s.handleStream) // WebSocket
+		api.Get("/locks", s.handleLocks)
+		api.Get("/hot-objects", s.handleHotObjects)
 
 		// State-changing actions: add an Origin check on top of auth.
 		api.Group(func(act chi.Router) {

@@ -79,13 +79,14 @@ func run(configPath string, log *slog.Logger) error {
 	}
 
 	srv := api.New(api.Config{
-		Cluster: cfg.Cluster.Name,
-		Store:   storage,
-		Poller:  pollerSvc,
-		Signal:  signalSvc,
-		Auth:    auth.New(cfg.Auth.Token),
-		UI:      ui,
-		Log:     log,
+		Cluster:   cfg.Cluster.Name,
+		Store:     storage,
+		Poller:    pollerSvc,
+		Signal:    signalSvc,
+		Inspector: client,
+		Auth:      auth.New(cfg.Auth.Token),
+		UI:        ui,
+		Log:       log,
 	})
 
 	httpSrv := &http.Server{
