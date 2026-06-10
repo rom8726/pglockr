@@ -31,3 +31,9 @@ go.work.sum
 # Editor/IDE
 .idea/
 .vscode/
+
+# config
+pglockr.yaml
+
+# frontend
+web/dist/assets

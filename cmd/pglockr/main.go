@@ -57,19 +57,19 @@ func run(configPath string, log *slog.Logger) error {
 		"cluster", cfg.Cluster.Name,
 		"server_version_num", client.ServerVersionNum())
 
-	st := store.New(cfg.Poll.RingSize)
+	storage := store.New(cfg.Poll.RingSize)
 
-	p := poller.New(cfg.Cluster.Name, client, st, cfg.Poll.Interval, log)
-	go p.Run(ctx)
+	pollerSvc := poller.New(cfg.Cluster.Name, client, storage, cfg.Poll.Interval, log)
+	go pollerSvc.Run(ctx)
 
 	// Audit lookup: the victim's current query from the latest snapshot.
 	lookup := func(pid int) (string, bool) {
-		snap, ok := st.Latest()
+		snap, ok := storage.Latest()
 		if !ok {
 			return "", false
 		}
-		s, ok := snap.Sessions[pid]
-		return s.Query, ok
+		sess, ok := snap.Sessions[pid]
+		return sess.Query, ok
 	}
 	signalSvc := sig.New(client, lookup, log)
 
@@ -80,8 +80,8 @@ func run(configPath string, log *slog.Logger) error {
 
 	srv := api.New(api.Config{
 		Cluster: cfg.Cluster.Name,
-		Store:   st,
-		Poller:  p,
+		Store:   storage,
+		Poller:  pollerSvc,
 		Signal:  signalSvc,
 		Auth:    auth.New(cfg.Auth.Token),
 		UI:      ui,
@@ -97,8 +97,8 @@ func run(configPath string, log *slog.Logger) error {
 	// Shut the HTTP server down gracefully when the context is cancelled.
 	go func() {
 		<-ctx.Done()
-		shutdownCtx, c := context.WithTimeout(context.Background(), 10*time.Second)
-		defer c()
+		shutdownCtx, shutdownCancel := context.WithTimeout(context.Background(), 10*time.Second)
+		defer shutdownCancel()
 		_ = httpSrv.Shutdown(shutdownCtx)
 	}()
 
@@ -106,5 +106,6 @@ func run(configPath string, log *slog.Logger) error {
 	if err := httpSrv.ListenAndServe(); err != nil && !errors.Is(err, http.ErrServerClosed) {
 		return err
 	}
+
 	return nil
 }
