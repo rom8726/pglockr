@@ -82,3 +82,21 @@ internal/auth    static-token middleware
 internal/api     REST + WebSocket handlers
 web/             React + Vite UI, embedded via go:embed
 ```
+
+## Tests
+
+```sh
+go test ./...                 # fast unit tests (no database needed)
+```
+
+Integration tests (build tag `integration`) run the pg layer against a real
+PostgreSQL; they skip unless `PGLOCKR_TEST_DSN` is set:
+
+```sh
+PGLOCKR_TEST_DSN="postgres://postgres:postgres@localhost:55432/app?sslmode=disable" \
+  go test -tags=integration -race ./...
+```
+
+The [`dev/`](dev/README.md) bench is a convenient target (`cd dev && make up`).
+CI (`.github/workflows/ci.yml`) runs gofmt + vet + the full `-race` suite against
+a Postgres service container, and builds the UI.
