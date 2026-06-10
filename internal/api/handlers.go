@@ -1,0 +1,115 @@
+package api
+
+import (
+	"encoding/json"
+	"errors"
+	"io/fs"
+	"net/http"
+	"strconv"
+	"time"
+
+	"github.com/go-chi/chi/v5"
+
+	"github.com/rom8726/pglockr/internal/signal"
+)
+
+func writeJSON(w http.ResponseWriter, status int, v any) {
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(status)
+	_ = json.NewEncoder(w).Encode(v)
+}
+
+func (s *Server) handleHealthz(w http.ResponseWriter, _ *http.Request) {
+	st := s.poller.Status()
+	code := http.StatusOK
+	if !st.Connected {
+		code = http.StatusServiceUnavailable
+	}
+	writeJSON(w, code, map[string]any{
+		"status":    map[bool]string{true: "ok", false: "degraded"}[st.Connected],
+		"connected": st.Connected,
+		"lastPoll":  st.LastPoll,
+	})
+}
+
+func (s *Server) handleClusters(w http.ResponseWriter, _ *http.Request) {
+	// MVP: a single cluster, reported with its live poll status.
+	writeJSON(w, http.StatusOK, []any{s.poller.Status()})
+}
+
+func (s *Server) handleSnapshot(w http.ResponseWriter, r *http.Request) {
+	if at := r.URL.Query().Get("at"); at != "" {
+		t, err := time.Parse(time.RFC3339, at)
+		if err != nil {
+			http.Error(w, "invalid 'at' timestamp (want RFC3339)", http.StatusBadRequest)
+			return
+		}
+		snap, ok := s.store.At(t)
+		if !ok {
+			http.Error(w, "no snapshot available", http.StatusNotFound)
+			return
+		}
+		writeJSON(w, http.StatusOK, snap)
+		return
+	}
+
+	snap, ok := s.store.Latest()
+	if !ok {
+		http.Error(w, "no snapshot available yet", http.StatusServiceUnavailable)
+		return
+	}
+	writeJSON(w, http.StatusOK, snap)
+}
+
+func (s *Server) handleCancel(w http.ResponseWriter, r *http.Request) {
+	s.doSignal(w, r, signal.ActionCancel)
+}
+
+func (s *Server) handleTerminate(w http.ResponseWriter, r *http.Request) {
+	s.doSignal(w, r, signal.ActionTerminate)
+}
+
+func (s *Server) doSignal(w http.ResponseWriter, r *http.Request, action signal.Action) {
+	pid, err := strconv.Atoi(chi.URLParam(r, "pid"))
+	if err != nil {
+		http.Error(w, "invalid pid", http.StatusBadRequest)
+		return
+	}
+	// MVP single-token auth: there is one authenticated identity.
+	res, err := s.signal.Do(r.Context(), action, pid, "token")
+	if err != nil {
+		writeJSON(w, http.StatusBadGateway, map[string]any{
+			"error":  err.Error(),
+			"result": res,
+		})
+		return
+	}
+	writeJSON(w, http.StatusOK, res)
+}
+
+// spaHandler serves the embedded UI, falling back to index.html for client-side
+// routes (single-page app).
+func (s *Server) spaHandler() http.Handler {
+	fileServer := http.FileServer(http.FS(s.ui))
+	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		// If the requested asset exists, serve it; otherwise serve index.html.
+		p := r.URL.Path
+		if p != "/" {
+			if _, err := fs.Stat(s.ui, trimLeadingSlash(p)); errors.Is(err, fs.ErrNotExist) {
+				r2 := new(http.Request)
+				*r2 = *r
+				r2.URL.Path = "/"
+				fileServer.ServeHTTP(w, r2)
+				return
+			}
+		}
+		fileServer.ServeHTTP(w, r)
+	})
+}
+
+func trimLeadingSlash(p string) string {
+	if len(p) > 0 && p[0] == '/' {
+		return p[1:]
+	}
+	return p
+}
