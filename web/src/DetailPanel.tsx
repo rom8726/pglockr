@@ -9,10 +9,12 @@ type Action = "cancel" | "terminate";
 export function DetailPanel({
   snapshot,
   pid,
+  canAct,
   onClose,
 }: {
   snapshot: Snapshot;
   pid: number;
+  canAct: boolean;
   onClose: () => void;
 }) {
   const session = snapshot.sessions[String(pid)];
@@ -75,7 +77,9 @@ export function DetailPanel({
       <pre className="panel__query">{session.query || "(no query text — pg_monitor required)"}</pre>
 
       <div className="panel__actions">
-        {confirm === null ? (
+        {!canAct ? (
+          <p className="panel__note">Read-only (viewer role): cancel/terminate disabled.</p>
+        ) : confirm === null ? (
           <>
             <button className="btn btn--warn" disabled={busy} onClick={() => setConfirm("cancel")}>
               Cancel query
@@ -104,9 +108,11 @@ export function DetailPanel({
       </div>
 
       {result && <p className="panel__result">{result}</p>}
-      <p className="panel__note">
-        Note: superuser backends cannot be signalled with <code>pg_signal_backend</code>.
-      </p>
+      {canAct && (
+        <p className="panel__note">
+          Note: superuser backends cannot be signalled with <code>pg_signal_backend</code>.
+        </p>
+      )}
     </aside>
   );
 }

@@ -33,7 +33,7 @@ type Server struct {
 	poller    *poller.Poller
 	signal    *signal.Service
 	inspector Inspector
-	auth      *auth.Authenticator
+	auth      *auth.Middleware
 	ui        fs.FS
 	log       *slog.Logger
 }
@@ -45,7 +45,7 @@ type Config struct {
 	Poller    *poller.Poller
 	Signal    *signal.Service
 	Inspector Inspector
-	Auth      *auth.Authenticator
+	Auth      *auth.Middleware
 	UI        fs.FS
 	Log       *slog.Logger
 }
@@ -73,10 +73,12 @@ func (s *Server) Handler() http.Handler {
 	// Liveness needs no auth.
 	r.Get("/healthz", s.handleHealthz)
 
-	// Authenticated API surface.
+	// Authenticated API surface. Any authenticated principal is at least a
+	// viewer; actions require the operator role.
 	r.Route("/api", func(api chi.Router) {
-		api.Use(s.auth.Require)
+		api.Use(s.auth.Authenticate)
 
+		api.Get("/me", s.handleMe)
 		api.Get("/clusters", s.handleClusters)
 		api.Get("/snapshot", s.handleSnapshot)
 		api.Get("/history", s.handleHistory)
@@ -84,8 +86,9 @@ func (s *Server) Handler() http.Handler {
 		api.Get("/locks", s.handleLocks)
 		api.Get("/hot-objects", s.handleHotObjects)
 
-		// State-changing actions: add an Origin check on top of auth.
+		// State-changing actions: require operator + an Origin check.
 		api.Group(func(act chi.Router) {
+			act.Use(auth.RequireRole(auth.RoleOperator))
 			act.Use(requireSameOrigin)
 			act.Post("/sessions/{pid}/cancel", s.handleCancel)
 			act.Post("/sessions/{pid}/terminate", s.handleTerminate)

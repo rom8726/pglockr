@@ -143,13 +143,18 @@ func run(configPath string, log *slog.Logger) error {
 		return err
 	}
 
+	identity, err := buildIdentity(cfg.Auth)
+	if err != nil {
+		return err
+	}
+
 	srv := api.New(api.Config{
 		Cluster:   cfg.Cluster.Name,
 		Store:     storage,
 		Poller:    pollerSvc,
 		Signal:    signalSvc,
 		Inspector: client,
-		Auth:      auth.New(cfg.Auth.Token),
+		Auth:      auth.New(identity),
 		UI:        ui,
 		Log:       log,
 	})
@@ -174,6 +179,23 @@ func run(configPath string, log *slog.Logger) error {
 	}
 
 	return nil
+}
+
+// buildIdentity assembles the token identity from config: the legacy single
+// token (admin) plus any named principals.
+func buildIdentity(cfg config.AuthConfig) (auth.Identity, error) {
+	var entries []auth.TokenPrincipal
+	if cfg.Token != "" {
+		entries = append(entries, auth.TokenPrincipal{Name: "default", Role: auth.RoleAdmin, Token: cfg.Token})
+	}
+	for _, p := range cfg.Principals {
+		role, err := auth.ParseRole(p.Role)
+		if err != nil {
+			return nil, fmt.Errorf("principal %q: %w", p.Name, err)
+		}
+		entries = append(entries, auth.TokenPrincipal{Name: p.Name, Role: role, Token: p.Token})
+	}
+	return auth.NewTokenIdentity(entries), nil
 }
 
 // preflight checks the connected role's privileges and, if any are missing,

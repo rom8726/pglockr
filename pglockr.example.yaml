@@ -1,7 +1,8 @@
 # Example pglockr configuration. Secrets/paths are NOT read from this file:
 #   PGLOCKR_DSN     — target database connection string (required)
-#   PGLOCKR_TOKEN   — static access token for the UI/API (required)
+#   PGLOCKR_TOKEN   — legacy single token → admin role (optional if principals set)
 #   PGLOCKR_DB_PATH — SQLite history file; setting it enables persistence
+#   per-principal tokens — from the env var each principal names in tokenEnv
 # Optional env overrides: PGLOCKR_HTTP_ADDR, PGLOCKR_CLUSTER
 #
 # Run: PGLOCKR_DSN=... PGLOCKR_TOKEN=... ./pglockr -config pglockr.yaml
@@ -17,6 +18,18 @@ poll:
 
 http:
   addr: ":8080"
+
+auth:
+  # Role-based access. Each principal's token is read from the env var it names
+  # in tokenEnv (never stored here). Roles: viewer (read), operator (+ cancel/
+  # terminate), admin (+ audit/config). PGLOCKR_TOKEN, if set, is an admin.
+  principals:
+    - name: oncall
+      role: operator
+      tokenEnv: PGLOCKR_TOKEN_ONCALL
+    - name: dashboard
+      role: viewer
+      tokenEnv: PGLOCKR_TOKEN_DASHBOARD
 
 persist:
   # Durable snapshot history so the scrubber survives restarts. Enabled

@@ -10,6 +10,7 @@ import (
 
 	"github.com/go-chi/chi/v5"
 
+	"github.com/rom8726/pglockr/internal/auth"
 	"github.com/rom8726/pglockr/internal/signal"
 )
 
@@ -30,6 +31,17 @@ func (s *Server) handleHealthz(w http.ResponseWriter, _ *http.Request) {
 		"connected": st.Connected,
 		"lastPoll":  st.LastPoll,
 	})
+}
+
+// handleMe returns the authenticated principal so the UI can show identity and
+// gate role-restricted controls (e.g. hide cancel/terminate for viewers).
+func (s *Server) handleMe(w http.ResponseWriter, r *http.Request) {
+	p, ok := auth.PrincipalFrom(r.Context())
+	if !ok {
+		http.Error(w, "unauthorized", http.StatusUnauthorized)
+		return
+	}
+	writeJSON(w, http.StatusOK, p)
 }
 
 func (s *Server) handleClusters(w http.ResponseWriter, _ *http.Request) {
@@ -118,8 +130,12 @@ func (s *Server) doSignal(w http.ResponseWriter, r *http.Request, action signal.
 		http.Error(w, "invalid pid", http.StatusBadRequest)
 		return
 	}
-	// MVP single-token auth: there is one authenticated identity.
-	res, err := s.signal.Do(r.Context(), action, pid, "token")
+	// Attribute the action to the authenticated principal for the audit log.
+	actor := "unknown"
+	if p, ok := auth.PrincipalFrom(r.Context()); ok {
+		actor = p.Name
+	}
+	res, err := s.signal.Do(r.Context(), action, pid, actor)
 	if err != nil {
 		writeJSON(w, http.StatusBadGateway, map[string]any{
 			"error":  err.Error(),
