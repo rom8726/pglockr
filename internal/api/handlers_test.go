@@ -20,7 +20,19 @@ import (
 	"github.com/rom8726/pglockr/internal/store"
 )
 
-const testToken = "tok"
+const (
+	testToken   = "tok"      // admin (back-compat single token)
+	viewerToken = "view-tok" // viewer role
+	operatorTok = "op-tok"   // operator role
+)
+
+func testIdentity() auth.Identity {
+	return auth.NewTokenIdentity([]auth.TokenPrincipal{
+		{Name: "admin", Role: auth.RoleAdmin, Token: testToken},
+		{Name: "vera", Role: auth.RoleViewer, Token: viewerToken},
+		{Name: "olga", Role: auth.RoleOperator, Token: operatorTok},
+	})
+}
 
 // fakeSignaler records calls and returns canned results.
 type fakeSignaler struct {
@@ -62,16 +74,21 @@ func newTestServerWith(t *testing.T, st *store.Store, sig signal.Signaler, insp 
 		Poller:    p,
 		Signal:    signal.New(sig, nil, log),
 		Inspector: insp,
-		Auth:      auth.New(testToken),
+		Auth:      auth.New(testIdentity()),
 		UI:        fstest.MapFS{"index.html": {Data: []byte("<html>ui</html>")}},
 		Log:       log,
 	})
 	return srv.Handler()
 }
 
+// authed builds a request authenticated as the admin token (full access).
 func authed(method, target string) *http.Request {
+	return authedAs(method, target, testToken)
+}
+
+func authedAs(method, target, token string) *http.Request {
 	r := httptest.NewRequest(method, target, nil)
-	r.Header.Set("Authorization", "Bearer "+testToken)
+	r.Header.Set("Authorization", "Bearer "+token)
 	return r
 }
 
@@ -180,6 +197,59 @@ func TestCancelAction(t *testing.T) {
 	_ = json.Unmarshal(rec.Body.Bytes(), &res)
 	if res.Action != signal.ActionCancel || !res.Delivered {
 		t.Fatalf("result = %+v", res)
+	}
+}
+
+func TestMeEndpoint(t *testing.T) {
+	h := newTestServer(t, store.New(10), &fakeSignaler{})
+	rec := httptest.NewRecorder()
+	h.ServeHTTP(rec, authedAs(http.MethodGet, "/api/me", operatorTok))
+	if rec.Code != http.StatusOK {
+		t.Fatalf("got %d, want 200", rec.Code)
+	}
+	var p auth.Principal
+	if err := json.Unmarshal(rec.Body.Bytes(), &p); err != nil {
+		t.Fatalf("decode: %v", err)
+	}
+	if p.Name != "olga" || p.Role != auth.RoleOperator {
+		t.Fatalf("me = %+v", p)
+	}
+}
+
+func TestViewerCanReadButNotAct(t *testing.T) {
+	st := store.New(10)
+	st.Put(graph.Build("default", time.Now(), map[int]graph.Session{100: {PID: 100}}, nil))
+	sig := &fakeSignaler{delivered: true}
+	h := newTestServerWith(t, st, sig, &fakeInspector{})
+
+	// Viewer can read the snapshot.
+	rec := httptest.NewRecorder()
+	h.ServeHTTP(rec, authedAs(http.MethodGet, "/api/snapshot", viewerToken))
+	if rec.Code != http.StatusOK {
+		t.Fatalf("viewer GET snapshot = %d, want 200", rec.Code)
+	}
+
+	// But cannot cancel/terminate.
+	rec = httptest.NewRecorder()
+	h.ServeHTTP(rec, authedAs(http.MethodPost, "/api/sessions/100/cancel", viewerToken))
+	if rec.Code != http.StatusForbidden {
+		t.Fatalf("viewer POST cancel = %d, want 403", rec.Code)
+	}
+	if len(sig.cancelled) != 0 {
+		t.Fatal("viewer action must not reach the signaler")
+	}
+}
+
+func TestOperatorCanAct(t *testing.T) {
+	sig := &fakeSignaler{delivered: true}
+	h := newTestServer(t, store.New(10), sig)
+	rec := httptest.NewRecorder()
+	h.ServeHTTP(rec, authedAs(http.MethodPost, "/api/sessions/7/terminate", operatorTok))
+	if rec.Code != http.StatusOK {
+		t.Fatalf("operator POST terminate = %d, want 200", rec.Code)
+	}
+	if len(sig.terminated) != 1 || sig.terminated[0] != 7 {
+		t.Fatalf("terminate not delivered: %v", sig.terminated)
 	}
 }
 

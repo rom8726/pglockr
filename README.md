@@ -48,6 +48,26 @@ make load-chain   # manufacture a 3-deep blocking tree
 make load-reset   # clear it
 ```
 
+## Authentication & roles
+
+Access is role-based: **viewer** (read-only — forest, history, locks, hot
+objects), **operator** (+ cancel/terminate), **admin** (+ audit/config,
+reserved). Every action is attributed to its principal in the audit log.
+
+Principals are configured with their token in a per-user env var:
+
+```yaml
+auth:
+  principals:
+    - { name: oncall,    role: operator, tokenEnv: PGLOCKR_TOKEN_ONCALL }
+    - { name: dashboard, role: viewer,   tokenEnv: PGLOCKR_TOKEN_DASHBOARD }
+```
+
+`PGLOCKR_TOKEN`, if set, is a single **admin** token (backward compatible). The
+UI is role-aware (viewers don't see cancel/terminate) and `GET /api/me` returns
+the current principal. The `Identity` layer is pluggable — a trusted SSO-proxy
+mode (offload auth to oauth2-proxy/Istio) is the planned next source.
+
 ## History persistence
 
 By default snapshot history lives only in an in-memory ring buffer (~5 min),
@@ -90,14 +110,15 @@ fix it — it still runs (degraded) so you can see what to grant.
 | Method | Path | Auth | Purpose |
 |--------|------|------|---------|
 | GET  | `/healthz` | none | liveness + connection status |
-| GET  | `/api/clusters` | token | cluster + poll status |
-| GET  | `/api/snapshot?cluster=NAME[&at=RFC3339]` | token | current/nearest forest |
-| GET  | `/api/history?cluster=NAME[&from&to]` | token | retained snapshot metadata (scrubber) |
-| WS   | `/api/stream?cluster=NAME` | token | live snapshot stream |
-| GET  | `/api/locks?cluster=NAME` | token | lock inspector (raw `pg_locks`) |
-| GET  | `/api/hot-objects?cluster=NAME` | token | most contended relations |
-| POST | `/api/sessions/{pid}/cancel` | token | `pg_cancel_backend` |
-| POST | `/api/sessions/{pid}/terminate` | token | `pg_terminate_backend` |
+| GET  | `/api/me` | viewer | current principal (name + role) |
+| GET  | `/api/clusters` | viewer | cluster + poll status |
+| GET  | `/api/snapshot?cluster=NAME[&at=RFC3339]` | viewer | current/nearest forest |
+| GET  | `/api/history?cluster=NAME[&from&to]` | viewer | retained snapshot metadata (scrubber) |
+| WS   | `/api/stream?cluster=NAME` | viewer | live snapshot stream |
+| GET  | `/api/locks?cluster=NAME` | viewer | lock inspector (raw `pg_locks`) |
+| GET  | `/api/hot-objects?cluster=NAME` | viewer | most contended relations |
+| POST | `/api/sessions/{pid}/cancel` | operator | `pg_cancel_backend` |
+| POST | `/api/sessions/{pid}/terminate` | operator | `pg_terminate_backend` |
 
 ## Project layout
 

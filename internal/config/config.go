@@ -50,9 +50,22 @@ type HTTPConfig struct {
 	Addr string `yaml:"addr"`
 }
 
-// AuthConfig holds tool authentication. Token comes from the environment.
+// AuthConfig holds tool authentication. Tokens come from the environment.
+//
+// Legacy: PGLOCKR_TOKEN is a single admin token (backward compatible). For RBAC,
+// list principals in YAML, each with its token in a named env var.
 type AuthConfig struct {
-	Token string `yaml:"-"`
+	Token      string            `yaml:"-"` // legacy single token (env PGLOCKR_TOKEN) → admin
+	Principals []PrincipalConfig `yaml:"principals"`
+}
+
+// PrincipalConfig is one named access principal. Its token is read from the
+// environment variable named by TokenEnv (never stored in the YAML).
+type PrincipalConfig struct {
+	Name     string `yaml:"name"`
+	Role     string `yaml:"role"`
+	TokenEnv string `yaml:"tokenEnv"`
+	Token    string `yaml:"-"` // resolved from TokenEnv
 }
 
 // Defaults returns a config populated with the MVP defaults from the spec.
@@ -100,6 +113,12 @@ func Load(path string) (Config, error) {
 	// Secrets and overrides from the environment.
 	cfg.Cluster.DSN = os.Getenv(EnvDSN)
 	cfg.Auth.Token = os.Getenv(EnvToken)
+	// Resolve each principal's token from its named env var.
+	for i := range cfg.Auth.Principals {
+		if env := cfg.Auth.Principals[i].TokenEnv; env != "" {
+			cfg.Auth.Principals[i].Token = os.Getenv(env)
+		}
+	}
 	if v := os.Getenv(EnvHTTPAddr); v != "" {
 		cfg.HTTP.Addr = v
 	}
@@ -140,12 +159,29 @@ func Load(path string) (Config, error) {
 	return cfg, nil
 }
 
+var validRoles = map[string]bool{"viewer": true, "operator": true, "admin": true}
+
 func (c Config) validate() error {
 	if c.Cluster.DSN == "" {
 		return fmt.Errorf("%s must be set (target database DSN)", EnvDSN)
 	}
-	if c.Auth.Token == "" {
-		return fmt.Errorf("%s must be set (tool auth token)", EnvToken)
+	// Authentication: a legacy single token and/or named principals.
+	if c.Auth.Token == "" && len(c.Auth.Principals) == 0 {
+		return fmt.Errorf("no auth configured: set %s or define auth.principals", EnvToken)
+	}
+	for i, p := range c.Auth.Principals {
+		if p.Name == "" {
+			return fmt.Errorf("auth.principals[%d]: name is required", i)
+		}
+		if !validRoles[p.Role] {
+			return fmt.Errorf("auth.principals[%d] (%s): invalid role %q (want viewer|operator|admin)", i, p.Name, p.Role)
+		}
+		if p.TokenEnv == "" {
+			return fmt.Errorf("auth.principals[%d] (%s): tokenEnv is required", i, p.Name)
+		}
+		if p.Token == "" {
+			return fmt.Errorf("auth.principals[%d] (%s): env %s is empty", i, p.Name, p.TokenEnv)
+		}
 	}
 	if c.Persist.Enabled && c.Persist.Path == "" {
 		return fmt.Errorf("persistence enabled but no path set (%s)", EnvDBPath)

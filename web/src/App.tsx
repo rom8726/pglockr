@@ -8,8 +8,8 @@ import { Scrubber } from "./Scrubber";
 import { Login } from "./Login";
 import { useStream } from "./useStream";
 import { usePolled } from "./usePolled";
-import { clearToken, fetchHistory, fetchSnapshot, getToken } from "./api";
-import type { Snapshot, SnapshotMeta } from "./types";
+import { clearToken, fetchHistory, fetchMe, fetchSnapshot, getToken } from "./api";
+import { canAct, type Principal, type Snapshot, type SnapshotMeta } from "./types";
 
 const CLUSTER = "default";
 
@@ -23,6 +23,7 @@ const TABS: { id: View; label: string }[] = [
 
 export default function App() {
   const [authed, setAuthed] = useState(() => !!getToken());
+  const [me, setMe] = useState<Principal | null>(null);
   const [view, setView] = useState<View>("forest");
   const [selectedPid, setSelectedPid] = useState<number | null>(null);
 
@@ -42,6 +43,17 @@ export default function App() {
 
   const n = metas?.length ?? 0;
   const effectiveIndex = paused ? Math.min(index, Math.max(0, n - 1)) : Math.max(0, n - 1);
+
+  // Resolve the authenticated principal (name + role) for the UI.
+  useEffect(() => {
+    if (!authed) {
+      setMe(null);
+      return;
+    }
+    fetchMe()
+      .then(setMe)
+      .catch(() => {});
+  }, [authed]);
 
   // Seed with a REST snapshot before the first WebSocket frame.
   useEffect(() => {
@@ -135,10 +147,16 @@ export default function App() {
           </>
         )}
         <span className="topbar__spacer" />
+        {me && (
+          <span className="topbar__user" title={`role: ${me.role}`}>
+            {me.name} <span className={`rolebadge rolebadge--${me.role}`}>{me.role}</span>
+          </span>
+        )}
         <button
           className="btn btn--ghost"
           onClick={() => {
             clearToken();
+            setMe(null);
             setAuthed(false);
           }}
         >
@@ -164,7 +182,12 @@ export default function App() {
               />
             </div>
             {selectedPid !== null && displayed && (
-              <DetailPanel snapshot={displayed} pid={selectedPid} onClose={() => setSelectedPid(null)} />
+              <DetailPanel
+                snapshot={displayed}
+                pid={selectedPid}
+                canAct={canAct(me?.role)}
+                onClose={() => setSelectedPid(null)}
+              />
             )}
           </>
         )}

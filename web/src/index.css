@@ -77,6 +77,30 @@ body {
 .topbar__spacer {
   flex: 1;
 }
+.topbar__user {
+  color: var(--text-dim);
+  font-size: 13px;
+}
+.rolebadge {
+  font-size: 10px;
+  font-weight: 700;
+  letter-spacing: 0.4px;
+  text-transform: uppercase;
+  padding: 1px 6px;
+  border-radius: 999px;
+  border: 1px solid var(--border);
+}
+.rolebadge--viewer {
+  color: var(--text-dim);
+}
+.rolebadge--operator {
+  color: var(--warn);
+  border-color: var(--warn);
+}
+.rolebadge--admin {
+  color: var(--danger);
+  border-color: var(--danger);
+}
 
 /* Tabs */
 .tabs {

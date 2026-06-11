@@ -41,6 +41,17 @@ export interface ActionResult {
   at: string;
 }
 
+export type Role = "viewer" | "operator" | "admin";
+
+export interface Principal {
+  name: string;
+  role: Role;
+}
+
+export function canAct(role: Role | undefined): boolean {
+  return role === "operator" || role === "admin";
+}
+
 export interface SnapshotMeta {
   takenAt: string;
   roots: number;
