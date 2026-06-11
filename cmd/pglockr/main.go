@@ -17,6 +17,7 @@ import (
 	"github.com/rom8726/pglockr/internal/api"
 	"github.com/rom8726/pglockr/internal/auth"
 	"github.com/rom8726/pglockr/internal/config"
+	"github.com/rom8726/pglockr/internal/persist"
 	"github.com/rom8726/pglockr/internal/pg"
 	"github.com/rom8726/pglockr/internal/poller"
 	sig "github.com/rom8726/pglockr/internal/signal"
@@ -58,6 +59,18 @@ func run(configPath string, log *slog.Logger) error {
 		"server_version_num", client.ServerVersionNum())
 
 	storage := store.New(cfg.Poll.RingSize)
+
+	// Optional durable history so the scrubber survives restarts (spec 5.9).
+	if cfg.Persist.Enabled {
+		hist, err := persist.Open(cfg.Persist.Path, cfg.Persist.Retention, log)
+		if err != nil {
+			return err
+		}
+		defer hist.Close()
+		storage.SetPersister(hist, log)
+		log.Info("history persistence enabled",
+			"path", cfg.Persist.Path, "retention", cfg.Persist.Retention)
+	}
 
 	pollerSvc := poller.New(cfg.Cluster.Name, client, storage, cfg.Poll.Interval, log)
 	go pollerSvc.Run(ctx)

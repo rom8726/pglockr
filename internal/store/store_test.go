@@ -87,6 +87,69 @@ func TestHistory(t *testing.T) {
 	}
 }
 
+// fakePersister records Saves and serves canned At/History, or an error.
+type fakePersister struct {
+	saved   int
+	metas   []Meta
+	at      graph.Snapshot
+	atOK    bool
+	failAt  bool
+	failHis bool
+}
+
+func (f *fakePersister) Save(graph.Snapshot) error { f.saved++; return nil }
+func (f *fakePersister) At(time.Time) (graph.Snapshot, bool, error) {
+	if f.failAt {
+		return graph.Snapshot{}, false, errFake
+	}
+	return f.at, f.atOK, nil
+}
+func (f *fakePersister) History(time.Time, time.Time) ([]Meta, error) {
+	if f.failHis {
+		return nil, errFake
+	}
+	return f.metas, nil
+}
+
+var errFake = errFakeType("boom")
+
+type errFakeType string
+
+func (e errFakeType) Error() string { return string(e) }
+
+func TestPersisterDelegationAndFallback(t *testing.T) {
+	st := New(5)
+	fp := &fakePersister{
+		metas: []Meta{{Roots: 9}},
+		at:    graph.Snapshot{Cluster: "from-persist"},
+		atOK:  true,
+	}
+	st.SetPersister(fp, nil)
+
+	// Put writes through to the persister.
+	st.Put(snap(1))
+	if fp.saved != 1 {
+		t.Fatalf("persister.Save not called, saved=%d", fp.saved)
+	}
+
+	// At/History are served from the persister when it succeeds.
+	if got, ok := st.At(time.Now()); !ok || got.Cluster != "from-persist" {
+		t.Fatalf("At not delegated: %+v ok=%v", got, ok)
+	}
+	if h := st.History(time.Time{}, time.Time{}); len(h) != 1 || h[0].Roots != 9 {
+		t.Fatalf("History not delegated: %+v", h)
+	}
+
+	// On persister error, fall back to the in-memory ring.
+	fp.failAt, fp.failHis = true, true
+	if _, ok := st.At(time.Now()); !ok {
+		t.Fatalf("At fallback to ring failed")
+	}
+	if h := st.History(time.Time{}, time.Time{}); len(h) != 1 {
+		t.Fatalf("History fallback to ring failed: %+v", h)
+	}
+}
+
 func TestDiffSnapshots(t *testing.T) {
 	prev := snap(1, 2)
 	cur := snap(2, 3)
