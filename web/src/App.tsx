@@ -1,13 +1,15 @@
-import { useEffect, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import { ReactFlowProvider } from "@xyflow/react";
 import { Forest } from "./Forest";
 import { DetailPanel } from "./DetailPanel";
 import { LocksView } from "./LocksView";
 import { HotObjectsView } from "./HotObjectsView";
+import { Scrubber } from "./Scrubber";
 import { Login } from "./Login";
 import { useStream } from "./useStream";
-import { clearToken, fetchSnapshot, getToken } from "./api";
-import type { Snapshot } from "./types";
+import { usePolled } from "./usePolled";
+import { clearToken, fetchHistory, fetchSnapshot, getToken } from "./api";
+import type { Snapshot, SnapshotMeta } from "./types";
 
 const CLUSTER = "default";
 
@@ -23,30 +25,91 @@ export default function App() {
   const [authed, setAuthed] = useState(() => !!getToken());
   const [view, setView] = useState<View>("forest");
   const [selectedPid, setSelectedPid] = useState<number | null>(null);
-  const { snapshot: live, state } = useStream(CLUSTER, authed);
-  const [snapshot, setSnapshot] = useState<Snapshot | null>(null);
 
-  // Seed with a REST snapshot so there is immediate content before the first
-  // WebSocket frame arrives; the stream then takes over.
+  const { snapshot: live, state } = useStream(CLUSTER, authed);
+  const [liveSnapshot, setLiveSnapshot] = useState<Snapshot | null>(null);
+
+  // History scrubber state.
+  const { data: metas } = usePolled<SnapshotMeta[]>(
+    () => fetchHistory(CLUSTER),
+    1500,
+    authed && view === "forest",
+  );
+  const [paused, setPaused] = useState(false);
+  const [index, setIndex] = useState(0);
+  const [playing, setPlaying] = useState(false);
+  const [histSnapshot, setHistSnapshot] = useState<Snapshot | null>(null);
+
+  const n = metas?.length ?? 0;
+  const effectiveIndex = paused ? Math.min(index, Math.max(0, n - 1)) : Math.max(0, n - 1);
+
+  // Seed with a REST snapshot before the first WebSocket frame.
   useEffect(() => {
     if (!authed) return;
     fetchSnapshot(CLUSTER)
-      .then(setSnapshot)
-      .catch(() => {
-        /* stream will fill in; ignore initial fetch errors */
-      });
+      .then(setLiveSnapshot)
+      .catch(() => {});
   }, [authed]);
 
   useEffect(() => {
-    if (live) setSnapshot(live);
+    if (live) setLiveSnapshot(live);
   }, [live]);
+
+  // While paused, fetch the historical snapshot at the selected timestamp.
+  const targetTs = paused && metas && metas[effectiveIndex] ? metas[effectiveIndex].takenAt : null;
+  useEffect(() => {
+    if (!targetTs) return;
+    let cancelled = false;
+    fetchSnapshot(CLUSTER, targetTs)
+      .then((s) => !cancelled && setHistSnapshot(s))
+      .catch(() => {});
+    return () => {
+      cancelled = true;
+    };
+  }, [targetTs]);
+
+  // Replay: advance through history while playing.
+  useEffect(() => {
+    if (!playing) return;
+    const id = setInterval(() => setIndex((i) => Math.min(i + 1, Math.max(0, n - 1))), 1000);
+    return () => clearInterval(id);
+  }, [playing, n]);
+
+  // When replay reaches the end, snap back to live.
+  useEffect(() => {
+    if (playing && paused && n > 0 && index >= n - 1) {
+      setPlaying(false);
+      setPaused(false);
+      setHistSnapshot(null);
+    }
+  }, [playing, paused, index, n]);
 
   if (!authed) {
     return <Login onAuthed={() => setAuthed(true)} />;
   }
 
-  const rootCount = snapshot?.roots?.length ?? 0;
-  const waiterCount = snapshot?.edges?.length ?? 0;
+  const displayed = paused ? histSnapshot : liveSnapshot;
+  const rootCount = displayed?.roots?.length ?? 0;
+  const waiterCount = displayed?.edges?.length ?? 0;
+
+  const goLive = () => {
+    setPaused(false);
+    setPlaying(false);
+    setHistSnapshot(null);
+  };
+  const seek = (i: number) => {
+    setPaused(true);
+    setIndex(i);
+  };
+  const togglePlay = () => {
+    if (playing) {
+      setPlaying(false);
+      return;
+    }
+    setPaused(true);
+    if (index >= n - 1) setIndex(0);
+    setPlaying(true);
+  };
 
   return (
     <div className="app">
@@ -86,21 +149,22 @@ export default function App() {
       <main className="main">
         {view === "forest" && (
           <>
-            <div className="graph">
-              {snapshot ? (
-                rootCount > 0 || waiterCount > 0 ? (
-                  <ReactFlowProvider>
-                    <Forest snapshot={snapshot} selectedPid={selectedPid} onSelect={setSelectedPid} />
-                  </ReactFlowProvider>
-                ) : (
-                  <div className="empty">No blocking right now. 🎉</div>
-                )
-              ) : (
-                <div className="empty">Waiting for first snapshot…</div>
-              )}
+            <div className="forest-pane">
+              <div className="graph">
+                <ForestArea snapshot={displayed} selectedPid={selectedPid} onSelect={setSelectedPid} paused={paused} />
+              </div>
+              <Scrubber
+                metas={metas ?? []}
+                index={effectiveIndex}
+                paused={paused}
+                playing={playing}
+                onSeek={seek}
+                onLive={goLive}
+                onTogglePlay={togglePlay}
+              />
             </div>
-            {selectedPid !== null && snapshot && (
-              <DetailPanel snapshot={snapshot} pid={selectedPid} onClose={() => setSelectedPid(null)} />
+            {selectedPid !== null && displayed && (
+              <DetailPanel snapshot={displayed} pid={selectedPid} onClose={() => setSelectedPid(null)} />
             )}
           </>
         )}
@@ -109,5 +173,31 @@ export default function App() {
         {view === "hot" && <HotObjectsView cluster={CLUSTER} />}
       </main>
     </div>
+  );
+}
+
+function ForestArea({
+  snapshot,
+  selectedPid,
+  onSelect,
+  paused,
+}: {
+  snapshot: Snapshot | null;
+  selectedPid: number | null;
+  onSelect: (pid: number) => void;
+  paused: boolean;
+}) {
+  const hasGraph = useMemo(
+    () => !!snapshot && ((snapshot.roots?.length ?? 0) > 0 || (snapshot.edges?.length ?? 0) > 0),
+    [snapshot],
+  );
+  if (!snapshot) return <div className="empty">Waiting for first snapshot…</div>;
+  if (!hasGraph) {
+    return <div className="empty">{paused ? "No blocking at this moment." : "No blocking right now. 🎉"}</div>;
+  }
+  return (
+    <ReactFlowProvider>
+      <Forest snapshot={snapshot} selectedPid={selectedPid} onSelect={onSelect} />
+    </ReactFlowProvider>
   );
 }
