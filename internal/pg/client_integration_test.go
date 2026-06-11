@@ -11,6 +11,7 @@ package pg
 
 import (
 	"context"
+	"fmt"
 	"os"
 	"testing"
 	"time"
@@ -194,6 +195,68 @@ func TestSnapshotBuildsForest(t *testing.T) {
 	if !found {
 		t.Errorf("hot objects missing %s: %+v", itTable, hot)
 	}
+}
+
+// TestCapabilities checks the preflight privilege detection both for the
+// (superuser) test DSN and for a freshly-created limited role with no grants.
+func TestCapabilities(t *testing.T) {
+	dsn := dsnOrSkip(t)
+	ctx := context.Background()
+
+	// The provided DSN (postgres superuser in CI) should report full caps.
+	super, err := Connect(ctx, dsn, 3*time.Second)
+	if err != nil {
+		t.Fatalf("connect: %v", err)
+	}
+	defer super.Close()
+	caps, err := super.Capabilities(ctx)
+	if err != nil {
+		t.Fatalf("capabilities: %v", err)
+	}
+	if !caps.IsSuperuser || !caps.CanReadStats || !caps.CanSignal {
+		t.Fatalf("superuser should have all caps, got %+v", caps)
+	}
+
+	// Create a bare LOGIN role with no privileges and connect as it.
+	admin, err := pgx.Connect(ctx, dsn)
+	if err != nil {
+		t.Fatalf("admin connect: %v", err)
+	}
+	defer admin.Close(ctx)
+	const limited = "pglockr_caps_lim"
+	_, _ = admin.Exec(ctx, `DROP ROLE IF EXISTS `+limited)
+	if _, err := admin.Exec(ctx, fmt.Sprintf(`CREATE ROLE %s LOGIN PASSWORD 'x'`, limited)); err != nil {
+		t.Fatalf("create limited role: %v", err)
+	}
+	t.Cleanup(func() { _, _ = admin.Exec(context.Background(), `DROP ROLE IF EXISTS `+limited) })
+
+	limDSN := withCreds(t, dsn, limited, "x")
+	lim, err := Connect(ctx, limDSN, 3*time.Second)
+	if err != nil {
+		t.Fatalf("connect limited: %v", err)
+	}
+	defer lim.Close()
+	lc, err := lim.Capabilities(ctx)
+	if err != nil {
+		t.Fatalf("limited capabilities: %v", err)
+	}
+	if lc.IsSuperuser || lc.CanReadStats || lc.CanSignal {
+		t.Fatalf("bare role should have no caps, got %+v", lc)
+	}
+	if lc.Role != limited {
+		t.Fatalf("role = %q, want %q", lc.Role, limited)
+	}
+}
+
+// withCreds rebuilds a DSN with a different user/password, preserving host/port/db.
+func withCreds(t *testing.T, dsn, user, pass string) string {
+	t.Helper()
+	cfg, err := pgx.ParseConfig(dsn)
+	if err != nil {
+		t.Fatalf("parse dsn: %v", err)
+	}
+	return fmt.Sprintf("postgres://%s:%s@%s:%d/%s?sslmode=disable",
+		user, pass, cfg.Host, cfg.Port, cfg.Database)
 }
 
 func blockedBy(snap graph.Snapshot, pid, blocker int) bool {
