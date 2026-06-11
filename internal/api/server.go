@@ -79,6 +79,7 @@ func (s *Server) Handler() http.Handler {
 
 		api.Get("/clusters", s.handleClusters)
 		api.Get("/snapshot", s.handleSnapshot)
+		api.Get("/history", s.handleHistory)
 		api.Get("/stream", s.handleStream) // WebSocket
 		api.Get("/locks", s.handleLocks)
 		api.Get("/hot-objects", s.handleHotObjects)

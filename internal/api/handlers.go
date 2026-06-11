@@ -61,6 +61,31 @@ func (s *Server) handleSnapshot(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, http.StatusOK, snap)
 }
 
+// handleHistory returns metadata of retained snapshots in an optional [from,to]
+// window (RFC3339), oldest first — the data the UI scrubber timeline is built
+// from.
+func (s *Server) handleHistory(w http.ResponseWriter, r *http.Request) {
+	q := r.URL.Query()
+	from, err := parseOptTime(q.Get("from"))
+	if err != nil {
+		http.Error(w, "invalid 'from' timestamp (want RFC3339)", http.StatusBadRequest)
+		return
+	}
+	to, err := parseOptTime(q.Get("to"))
+	if err != nil {
+		http.Error(w, "invalid 'to' timestamp (want RFC3339)", http.StatusBadRequest)
+		return
+	}
+	writeJSON(w, http.StatusOK, s.store.History(from, to))
+}
+
+func parseOptTime(v string) (time.Time, error) {
+	if v == "" {
+		return time.Time{}, nil
+	}
+	return time.Parse(time.RFC3339, v)
+}
+
 func (s *Server) handleLocks(w http.ResponseWriter, r *http.Request) {
 	rows, err := s.inspector.Locks(r.Context())
 	if err != nil {

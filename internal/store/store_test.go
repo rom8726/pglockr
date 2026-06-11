@@ -56,6 +56,37 @@ func TestSubscribeReceives(t *testing.T) {
 	}
 }
 
+func TestHistory(t *testing.T) {
+	st := New(5)
+	base := time.Now().Truncate(time.Second)
+	for i := 0; i < 4; i++ {
+		s := snap(i) // one session (PID i)
+		s.TakenAt = base.Add(time.Duration(i) * time.Second)
+		s.Roots = []int{i}
+		st.Put(s)
+	}
+
+	// Full range, ascending by time.
+	all := st.History(time.Time{}, time.Time{})
+	if len(all) != 4 {
+		t.Fatalf("want 4 metas, got %d", len(all))
+	}
+	for i := 1; i < len(all); i++ {
+		if all[i].TakenAt.Before(all[i-1].TakenAt) {
+			t.Fatalf("history not ascending: %v", all)
+		}
+	}
+	if all[0].Roots != 1 || all[0].Sessions != 1 {
+		t.Fatalf("meta summary wrong: %+v", all[0])
+	}
+
+	// Windowed: [base+1s, base+2s] → two entries.
+	win := st.History(base.Add(time.Second), base.Add(2*time.Second))
+	if len(win) != 2 {
+		t.Fatalf("want 2 metas in window, got %d: %+v", len(win), win)
+	}
+}
+
 func TestDiffSnapshots(t *testing.T) {
 	prev := snap(1, 2)
 	cur := snap(2, 3)

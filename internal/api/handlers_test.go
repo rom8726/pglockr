@@ -7,6 +7,7 @@ import (
 	"log/slog"
 	"net/http"
 	"net/http/httptest"
+	"net/url"
 	"testing"
 	"testing/fstest"
 	"time"
@@ -118,6 +119,41 @@ func TestSnapshotReturnsForest(t *testing.T) {
 	}
 }
 
+func TestSnapshotAt(t *testing.T) {
+	st := store.New(10)
+	base := time.Now().Truncate(time.Second)
+	for i := 0; i < 3; i++ {
+		s := graph.Build("default", base.Add(time.Duration(i)*time.Second),
+			map[int]graph.Session{100: {PID: 100}, 200: {PID: 200, BlockedBy: []int{100}}}, nil)
+		st.Put(s)
+	}
+	h := newTestServer(t, st, &fakeSignaler{})
+
+	// Ask for the middle snapshot by its exact timestamp.
+	want := base.Add(time.Second)
+	rec := httptest.NewRecorder()
+	h.ServeHTTP(rec, authed(http.MethodGet, "/api/snapshot?at="+url.QueryEscape(want.Format(time.RFC3339))))
+	if rec.Code != http.StatusOK {
+		t.Fatalf("got %d, want 200", rec.Code)
+	}
+	var snap graph.Snapshot
+	if err := json.Unmarshal(rec.Body.Bytes(), &snap); err != nil {
+		t.Fatalf("decode: %v", err)
+	}
+	if !snap.TakenAt.Equal(want) {
+		t.Fatalf("at= returned %v, want nearest %v", snap.TakenAt, want)
+	}
+}
+
+func TestSnapshotAtBadTimestamp(t *testing.T) {
+	h := newTestServer(t, store.New(10), &fakeSignaler{})
+	rec := httptest.NewRecorder()
+	h.ServeHTTP(rec, authed(http.MethodGet, "/api/snapshot?at=nope"))
+	if rec.Code != http.StatusBadRequest {
+		t.Fatalf("got %d, want 400", rec.Code)
+	}
+}
+
 func TestHealthzReflectsStatus(t *testing.T) {
 	// Fresh poller is not connected yet → degraded / 503.
 	h := newTestServer(t, store.New(10), &fakeSignaler{})
@@ -173,6 +209,42 @@ func TestActionRejectsCrossOrigin(t *testing.T) {
 	}
 	if len(sig.cancelled) != 0 {
 		t.Fatalf("cross-origin action must not reach the signaler")
+	}
+}
+
+func TestHistoryEndpoint(t *testing.T) {
+	st := store.New(10)
+	base := time.Now().Truncate(time.Second)
+	for i := 0; i < 3; i++ {
+		s := graph.Build("default", base.Add(time.Duration(i)*time.Second),
+			map[int]graph.Session{100: {PID: 100}, 200: {PID: 200, BlockedBy: []int{100}}}, nil)
+		st.Put(s)
+	}
+	h := newTestServer(t, st, &fakeSignaler{})
+
+	rec := httptest.NewRecorder()
+	h.ServeHTTP(rec, authed(http.MethodGet, "/api/history"))
+	if rec.Code != http.StatusOK {
+		t.Fatalf("got %d, want 200", rec.Code)
+	}
+	var metas []store.Meta
+	if err := json.Unmarshal(rec.Body.Bytes(), &metas); err != nil {
+		t.Fatalf("decode: %v", err)
+	}
+	if len(metas) != 3 {
+		t.Fatalf("want 3 metas, got %d", len(metas))
+	}
+	if metas[0].Roots != 1 || metas[0].Edges != 1 || metas[0].Sessions != 2 {
+		t.Fatalf("meta summary wrong: %+v", metas[0])
+	}
+}
+
+func TestHistoryBadTimestamp(t *testing.T) {
+	h := newTestServer(t, store.New(10), &fakeSignaler{})
+	rec := httptest.NewRecorder()
+	h.ServeHTTP(rec, authed(http.MethodGet, "/api/history?from=not-a-time"))
+	if rec.Code != http.StatusBadRequest {
+		t.Fatalf("got %d, want 400", rec.Code)
 	}
 }
 

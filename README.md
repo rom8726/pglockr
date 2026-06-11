@@ -64,6 +64,7 @@ pglockr needs `pg_monitor` to read other backends' query texts and
 | GET  | `/healthz` | none | liveness + connection status |
 | GET  | `/api/clusters` | token | cluster + poll status |
 | GET  | `/api/snapshot?cluster=NAME[&at=RFC3339]` | token | current/nearest forest |
+| GET  | `/api/history?cluster=NAME[&from&to]` | token | retained snapshot metadata (scrubber) |
 | WS   | `/api/stream?cluster=NAME` | token | live snapshot stream |
 | GET  | `/api/locks?cluster=NAME` | token | lock inspector (raw `pg_locks`) |
 | GET  | `/api/hot-objects?cluster=NAME` | token | most contended relations |

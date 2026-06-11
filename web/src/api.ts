@@ -1,4 +1,4 @@
-import type { ActionResult, HotObject, LockRow, Snapshot } from "./types";
+import type { ActionResult, HotObject, LockRow, Snapshot, SnapshotMeta } from "./types";
 
 // The bearer token is kept in localStorage and also mirrored into a cookie so
 // the browser can authenticate the WebSocket upgrade (which cannot set custom
@@ -33,11 +33,18 @@ async function handle<T>(res: Response): Promise<T> {
   return res.json() as Promise<T>;
 }
 
-export async function fetchSnapshot(cluster: string): Promise<Snapshot> {
-  const res = await fetch(`/api/snapshot?cluster=${encodeURIComponent(cluster)}`, {
+export async function fetchSnapshot(cluster: string, at?: string): Promise<Snapshot> {
+  let url = `/api/snapshot?cluster=${encodeURIComponent(cluster)}`;
+  if (at) url += `&at=${encodeURIComponent(at)}`;
+  const res = await fetch(url, { headers: authHeaders() });
+  return handle<Snapshot>(res);
+}
+
+export async function fetchHistory(cluster: string): Promise<SnapshotMeta[]> {
+  const res = await fetch(`/api/history?cluster=${encodeURIComponent(cluster)}`, {
     headers: authHeaders(),
   });
-  return handle<Snapshot>(res);
+  return handle<SnapshotMeta[]>(res);
 }
 
 export async function fetchLocks(cluster: string): Promise<LockRow[]> {

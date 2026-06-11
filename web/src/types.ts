@@ -41,6 +41,13 @@ export interface ActionResult {
   at: string;
 }
 
+export interface SnapshotMeta {
+  takenAt: string;
+  roots: number;
+  edges: number;
+  sessions: number;
+}
+
 export interface LockRow {
   lockType: string;
   object: string;
