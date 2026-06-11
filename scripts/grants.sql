@@ -1,5 +1,9 @@
 -- pglockr role provisioning (spec section 7).
 --
+-- This is a STATIC reference. Prefer `pglockr grants` to generate an equivalent
+-- script with your own role name and a strong random password:
+--   pglockr grants --role pglockr_ro | psql "postgres://postgres@HOST:5432/DB"
+--
 -- Two least-privilege roles:
 --   pglockr_ro  — polling: read all stats / query texts (pg_monitor).
 --   pglockr_op  — actions: cancel/terminate other backends (pg_signal_backend).

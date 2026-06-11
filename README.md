@@ -63,11 +63,24 @@ Retention defaults to 24h (`persist.retention` in the config; `0` keeps
 forever). Running as a sidecar in Kubernetes, point `PGLOCKR_DB_PATH` at a
 mounted volume (PVC) so history outlives pod restarts.
 
-## Database roles
+## Database roles & first-run setup
 
 pglockr needs `pg_monitor` to read other backends' query texts and
-`pg_signal_backend` to cancel/terminate them. Provisioning script:
-[scripts/grants.sql](scripts/grants.sql).
+`pg_signal_backend` to cancel/terminate them. Generate a provisioning script for
+your own role and apply it as a superuser:
+
+```sh
+# Prints SQL to stdout (a strong password is generated and shown on stderr).
+pglockr grants --role pglockr_ro | psql "postgres://postgres@HOST:5432/DBNAME"
+```
+
+`pglockr grants` flags: `--role`, `--password` (default: generated),
+`--no-signal` (read-only viewer, no cancel/terminate). The static
+[scripts/grants.sql](scripts/grants.sql) is a reference equivalent.
+
+On startup pglockr runs a **preflight check** of the connected role and, if it
+is missing privileges, logs a warning and prints the exact `GRANT` statements to
+fix it — it still runs (degraded) so you can see what to grant.
 
 > Superuser backends cannot be cancelled/terminated via `pg_signal_backend`
 > (a PostgreSQL restriction); the UI surfaces this.
@@ -98,6 +111,7 @@ internal/persist SQLite durable history (optional)
 internal/poller  snapshot loop with backoff
 internal/signal  audited actions
 internal/auth    static-token middleware
+internal/setup   GRANT script generator + preflight remediation
 internal/api     REST + WebSocket handlers
 web/             React + Vite UI, embedded via go:embed
 ```
