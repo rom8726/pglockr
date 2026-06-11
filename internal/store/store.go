@@ -3,11 +3,21 @@
 package store
 
 import (
+	"log/slog"
 	"sync"
 	"time"
 
 	"github.com/rom8726/pglockr/internal/graph"
 )
+
+// Persister is an optional durable backend for snapshot history. When set, At
+// and History are served from it (so they can reach beyond the in-memory ring
+// and survive restarts); Latest and the live stream always use the ring.
+type Persister interface {
+	Save(snap graph.Snapshot) error
+	At(t time.Time) (graph.Snapshot, bool, error)
+	History(from, to time.Time) ([]Meta, error)
+}
 
 // Store is a bounded, concurrency-safe ring buffer of snapshots plus a pub/sub
 // hub. It holds the last cap snapshots (cap = ringSize from config).
@@ -20,6 +30,9 @@ type Store struct {
 
 	subs   map[int]chan graph.Snapshot
 	nextID int
+
+	persist Persister
+	log     *slog.Logger
 }
 
 // New returns a store retaining the last ringSize snapshots.
@@ -34,7 +47,17 @@ func New(ringSize int) *Store {
 	}
 }
 
-// Put appends a snapshot to the ring and publishes it to all subscribers.
+// SetPersister attaches a durable history backend. Call once at startup before
+// the poller runs. log may be nil.
+func (s *Store) SetPersister(p Persister, log *slog.Logger) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	s.persist = p
+	s.log = log
+}
+
+// Put appends a snapshot to the ring, persists it (if configured), and
+// publishes it to all subscribers.
 func (s *Store) Put(snap graph.Snapshot) {
 	s.mu.Lock()
 	s.buf[s.head] = snap
@@ -47,7 +70,17 @@ func (s *Store) Put(snap graph.Snapshot) {
 	for _, ch := range s.subs {
 		subs = append(subs, ch)
 	}
+	persist := s.persist
+	log := s.log
 	s.mu.Unlock()
+
+	// Persist outside the lock so disk I/O never stalls readers. Errors are
+	// logged; the in-memory ring still serves recent history.
+	if persist != nil {
+		if err := persist.Save(snap); err != nil && log != nil {
+			log.Warn("persist snapshot failed", "err", err)
+		}
+	}
 
 	for _, ch := range subs {
 		// Non-blocking: a slow client drops intermediate frames rather than
@@ -70,8 +103,23 @@ func (s *Store) Latest() (graph.Snapshot, bool) {
 	return s.buf[idx], true
 }
 
-// At returns the retained snapshot whose TakenAt is closest to t.
+// At returns the retained snapshot whose TakenAt is closest to t. With a
+// persister it reaches the full durable history; otherwise it uses the ring.
 func (s *Store) At(t time.Time) (graph.Snapshot, bool) {
+	s.mu.RLock()
+	persist, log := s.persist, s.log
+	s.mu.RUnlock()
+	if persist != nil {
+		snap, ok, err := persist.At(t)
+		if err != nil {
+			if log != nil {
+				log.Warn("persist At failed; falling back to ring", "err", err)
+			}
+		} else {
+			return snap, ok
+		}
+	}
+
 	s.mu.RLock()
 	defer s.mu.RUnlock()
 	if s.size == 0 {
@@ -104,7 +152,22 @@ type Meta struct {
 
 // History returns metadata for retained snapshots whose TakenAt falls in
 // [from, to], ascending by time. A zero `from`/`to` is treated as unbounded.
+// With a persister it returns the full durable history; otherwise the ring.
 func (s *Store) History(from, to time.Time) []Meta {
+	s.mu.RLock()
+	persist, log := s.persist, s.log
+	s.mu.RUnlock()
+	if persist != nil {
+		metas, err := persist.History(from, to)
+		if err != nil {
+			if log != nil {
+				log.Warn("persist History failed; falling back to ring", "err", err)
+			}
+		} else {
+			return metas
+		}
+	}
+
 	s.mu.RLock()
 	defer s.mu.RUnlock()
 

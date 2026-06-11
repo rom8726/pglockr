@@ -54,7 +54,7 @@ dsn: ## print the DSN to use with pglockr
 
 ## --- run pglockr against this bench ---
 pglockr: ## build & run pglockr pointed at this database (token: dev)
-	cd .. && PGLOCKR_DSN="$(DSN)" PGLOCKR_TOKEN="$(TOKEN)" go run ./cmd/pglockr
+	cd .. && PGLOCKR_DSN="$(DSN)" PGLOCKR_TOKEN="$(TOKEN)" PGLOCKR_DB_PATH=history.db go run ./cmd/pglockr
 
 ## --- load generation ---
 load-simple: ## one idle-in-txn holder + one waiter

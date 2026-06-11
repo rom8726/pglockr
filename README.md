@@ -48,6 +48,21 @@ make load-chain   # manufacture a 3-deep blocking tree
 make load-reset   # clear it
 ```
 
+## History persistence
+
+By default snapshot history lives only in an in-memory ring buffer (~5 min),
+which resets on restart. Set `PGLOCKR_DB_PATH` to a writable file to persist
+history to SQLite (pure-Go driver, no CGO) so the scrubber survives restarts and
+extends beyond the ring:
+
+```sh
+PGLOCKR_DB_PATH=/var/lib/pglockr/history.db ./pglockr ...
+```
+
+Retention defaults to 24h (`persist.retention` in the config; `0` keeps
+forever). Running as a sidecar in Kubernetes, point `PGLOCKR_DB_PATH` at a
+mounted volume (PVC) so history outlives pod restarts.
+
 ## Database roles
 
 pglockr needs `pg_monitor` to read other backends' query texts and
@@ -79,6 +94,7 @@ internal/config  YAML + env config
 internal/pg      version-aware queries, cancel/terminate
 internal/graph   wait-for forest builder
 internal/store   in-memory ring buffer + pub/sub
+internal/persist SQLite durable history (optional)
 internal/poller  snapshot loop with backoff
 internal/signal  audited actions
 internal/auth    static-token middleware
