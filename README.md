@@ -17,11 +17,37 @@ Requires Go 1.26+ and Node 18+ (for the UI build).
 make build        # builds web/dist then the ./pglockr binary
 ```
 
-Or with Docker:
+Or use the published container image:
 
 ```sh
-docker build -t pglockr .
+docker run --rm -p 8080:8080 \
+  -e PGLOCKR_DSN=... -e PGLOCKR_TOKEN=... \
+  ghcr.io/rom8726/pglockr:latest
 ```
+
+(Tagged releases publish multi-arch images and binary archives via goreleaser.)
+
+## Deployment (Kubernetes)
+
+One instance per cluster (sidecar model). A Helm chart is in
+[deploy/helm/pglockr](deploy/helm/pglockr/README.md):
+
+```sh
+helm install pglockr-mydb ./deploy/helm/pglockr \
+  --set cluster.name=mydb \
+  --set secret.data.PGLOCKR_DSN="postgres://pglockr_ro:***@db:5432/app?sslmode=disable" \
+  --set secret.data.PGLOCKR_TOKEN="$(openssl rand -hex 24)"
+```
+
+Supports token/proxy auth, redaction, and a PVC for durable history/audit.
+
+## Metrics
+
+`GET /metrics` exposes Prometheus metrics for pglockr's own health/activity —
+poll cadence/errors/duration, `pglockr_connected`, current `pglockr_sessions` /
+`pglockr_root_blockers` / `pglockr_blocked_edges`, and `pglockr_actions_total`.
+It carries no query texts, so it's unauthenticated like `/healthz`; scrape it
+from a trusted network (or enable the chart's ServiceMonitor).
 
 ## Run
 
@@ -174,8 +200,10 @@ internal/audit   action trail types + in-memory sink
 internal/redact  SQL literal masking (ingestion-time redaction)
 internal/poller  snapshot loop with backoff
 internal/signal  audited actions
-internal/auth    static-token middleware
+internal/auth    RBAC: token + proxy identity, role middleware
 internal/setup   GRANT script generator + preflight remediation
+internal/metrics Prometheus metrics
+deploy/helm      Kubernetes Helm chart
 internal/api     REST + WebSocket handlers
 web/             React + Vite UI, embedded via go:embed
 ```

@@ -7,14 +7,16 @@ COPY web/ ./
 RUN npm run build
 
 FROM golang:1.26-alpine AS build
+ARG VERSION=dev
 WORKDIR /app
 COPY go.mod go.sum ./
 RUN go mod download
 COPY . .
 COPY --from=ui /app/web/dist ./web/dist
-RUN CGO_ENABLED=0 go build -o /pglockr ./cmd/pglockr
+RUN CGO_ENABLED=0 go build -ldflags "-s -w -X main.version=${VERSION}" -o /pglockr ./cmd/pglockr
 
 FROM gcr.io/distroless/static-debian12
 COPY --from=build /pglockr /pglockr
 EXPOSE 8080
+USER nonroot:nonroot
 ENTRYPOINT ["/pglockr"]

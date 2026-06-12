@@ -29,12 +29,18 @@ type Signaler interface {
 // record), if known. It is satisfied by reading the latest snapshot.
 type QueryLookup func(pid int) (query string, ok bool)
 
+// Observer counts cancel/terminate actions (for metrics). Optional.
+type Observer interface {
+	ObserveAction(action string, delivered bool)
+}
+
 // Service performs audited cancel/terminate operations.
 type Service struct {
 	sig    Signaler
 	lookup QueryLookup
 	log    *slog.Logger
 	sink   audit.Sink
+	obs    Observer
 }
 
 // New constructs the signal service. lookup and sink may be nil; with a nil
@@ -42,6 +48,9 @@ type Service struct {
 func New(sig Signaler, lookup QueryLookup, log *slog.Logger, sink audit.Sink) *Service {
 	return &Service{sig: sig, lookup: lookup, log: log, sink: sink}
 }
+
+// SetMetrics attaches an optional action observer.
+func (s *Service) SetMetrics(o Observer) { s.obs = o }
 
 // Result reports the outcome of a signal attempt.
 type Result struct {
@@ -86,6 +95,9 @@ func (s *Service) Do(ctx context.Context, action Action, pid int, actor string) 
 		if rerr := s.sink.Record(entry); rerr != nil {
 			s.log.Error("audit sink write failed", "err", rerr)
 		}
+	}
+	if s.obs != nil {
+		s.obs.ObserveAction(string(action), entry.Delivered)
 	}
 
 	attrs := []any{

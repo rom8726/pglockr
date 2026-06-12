@@ -1,0 +1,48 @@
+# goreleaser config — cross-platform binaries + archives on tag.
+# The container image is built/pushed separately by the release workflow.
+version: 2
+
+before:
+  hooks:
+    # Build the embedded UI so go:embed has real assets.
+    - sh -c "cd web && npm ci && npm run build"
+    - go mod download
+
+builds:
+  - id: pglockr
+    main: ./cmd/pglockr
+    binary: pglockr
+    env:
+      - CGO_ENABLED=0
+    goos: [linux, darwin]
+    goarch: [amd64, arm64]
+    ldflags:
+      - -s -w -X main.version={{.Version}}
+
+archives:
+  - id: pglockr
+    formats: [tar.gz]
+    name_template: "pglockr_{{ .Version }}_{{ .Os }}_{{ .Arch }}"
+    files:
+      - README.md
+      - LICENSE
+      - pglockr.example.yaml
+      - scripts/grants.sql
+
+checksum:
+  name_template: "checksums.txt"
+
+snapshot:
+  version_template: "{{ incpatch .Version }}-next"
+
+changelog:
+  sort: asc
+  filters:
+    exclude:
+      - "^docs:"
+      - "^test:"
+      - "^chore:"
+
+release:
+  draft: false
+  prerelease: auto

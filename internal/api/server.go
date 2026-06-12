@@ -36,6 +36,7 @@ type Server struct {
 	inspector Inspector
 	audit     audit.Sink
 	auth      *auth.Middleware
+	metrics   http.Handler
 	ui        fs.FS
 	log       *slog.Logger
 }
@@ -49,6 +50,7 @@ type Config struct {
 	Inspector Inspector
 	Audit     audit.Sink
 	Auth      *auth.Middleware
+	Metrics   http.Handler // optional /metrics handler (Prometheus)
 	UI        fs.FS
 	Log       *slog.Logger
 }
@@ -63,6 +65,7 @@ func New(c Config) *Server {
 		inspector: c.Inspector,
 		audit:     c.Audit,
 		auth:      c.Auth,
+		metrics:   c.Metrics,
 		ui:        c.UI,
 		log:       c.Log,
 	}
@@ -76,6 +79,12 @@ func (s *Server) Handler() http.Handler {
 
 	// Liveness needs no auth.
 	r.Get("/healthz", s.handleHealthz)
+
+	// Prometheus metrics: pglockr's own health/activity only (no query texts),
+	// so unauthenticated like /healthz — scrape from a trusted network.
+	if s.metrics != nil {
+		r.Handle("/metrics", s.metrics)
+	}
 
 	// Authenticated API surface. Any authenticated principal is at least a
 	// viewer; actions require the operator role.

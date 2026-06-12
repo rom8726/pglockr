@@ -37,3 +37,6 @@ pglockr.yaml
 
 # frontend
 web/dist/assets
+
+# goreleaser output
+/dist/

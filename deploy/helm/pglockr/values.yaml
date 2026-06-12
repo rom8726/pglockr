@@ -1,0 +1,75 @@
+# pglockr Helm values. Deploy one release per target PostgreSQL cluster
+# (sidecar model). Secrets (DSN, tokens, proxy secret) come from a Secret.
+
+replicaCount: 1
+
+image:
+  repository: ghcr.io/rom8726/pglockr
+  tag: ""            # defaults to chart appVersion
+  pullPolicy: IfNotPresent
+
+# Target cluster name shown in the UI/metrics.
+cluster:
+  name: default
+
+poll:
+  interval: 1s
+  ringSize: 300
+
+# Mask query-text literals at ingestion.
+redaction:
+  enabled: false
+
+# Durable snapshot history + audit (SQLite on a PVC). Survives pod restarts.
+persistence:
+  enabled: false
+  size: 1Gi
+  storageClass: ""
+  mountPath: /var/lib/pglockr
+  retention: 24h
+
+auth:
+  mode: token        # token | proxy
+  # token mode: principals reference token env vars (put the tokens in the Secret).
+  principals: []
+  #  - { name: oncall, role: operator, tokenEnv: PGLOCKR_TOKEN_ONCALL }
+  # proxy mode: rendered verbatim into auth.proxy (put the secret in the Secret).
+  proxy: {}
+  #  trustMode: secret
+  #  secretEnv: PGLOCKR_PROXY_SECRET
+  #  roleMappings:
+  #    - { group: pglockr-admins, role: admin }
+
+# Secret holding DSN + tokens + proxy secret, injected as env (envFrom).
+# In production prefer existingSecret (e.g. managed by External Secrets / Vault).
+secret:
+  create: true
+  existingSecret: ""
+  data:
+    PGLOCKR_DSN: "postgres://pglockr_ro:CHANGEME@db.host:5432/app?sslmode=disable"
+    PGLOCKR_TOKEN: "CHANGEME-admin-token"
+
+service:
+  type: ClusterIP
+  port: 8080
+
+# Prometheus Operator ServiceMonitor for /metrics (unauthenticated).
+serviceMonitor:
+  enabled: false
+  interval: 30s
+  labels: {}
+
+# Plain Prometheus scrape annotations on the pod (when not using ServiceMonitor).
+metricsScrapeAnnotations: true
+
+resources:
+  requests:
+    cpu: 25m
+    memory: 64Mi
+  limits:
+    memory: 128Mi
+
+podAnnotations: {}
+nodeSelector: {}
+tolerations: []
+affinity: {}

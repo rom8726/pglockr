@@ -1,0 +1,30 @@
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: {{ include "pglockr.fullname" . }}
+  labels:
+    {{- include "pglockr.labels" . | nindent 4 }}
+data:
+  pglockr.yaml: |
+    cluster:
+      name: {{ .Values.cluster.name | quote }}
+    http:
+      addr: ":{{ .Values.service.port }}"
+    poll:
+      interval: {{ .Values.poll.interval }}
+      ringSize: {{ .Values.poll.ringSize }}
+    redaction:
+      enabled: {{ .Values.redaction.enabled }}
+    persist:
+      enabled: {{ .Values.persistence.enabled }}
+      retention: {{ .Values.persistence.retention }}
+    auth:
+      mode: {{ .Values.auth.mode | quote }}
+      {{- with .Values.auth.principals }}
+      principals:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
+      {{- with .Values.auth.proxy }}
+      proxy:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}

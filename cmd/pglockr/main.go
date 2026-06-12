@@ -19,6 +19,7 @@ import (
 	"github.com/rom8726/pglockr/internal/audit"
 	"github.com/rom8726/pglockr/internal/auth"
 	"github.com/rom8726/pglockr/internal/config"
+	"github.com/rom8726/pglockr/internal/metrics"
 	"github.com/rom8726/pglockr/internal/persist"
 	"github.com/rom8726/pglockr/internal/pg"
 	"github.com/rom8726/pglockr/internal/poller"
@@ -29,6 +30,9 @@ import (
 	"github.com/rom8726/pglockr/web"
 )
 
+// version is set at build time via -ldflags (goreleaser); "dev" otherwise.
+var version = "dev"
+
 func main() {
 	// `pglockr grants ...` generates the provisioning SQL and exits; it needs no
 	// DSN/token, so it is handled before the server flags/config.
@@ -37,6 +41,10 @@ func main() {
 			fmt.Fprintln(os.Stderr, "error:", err)
 			os.Exit(1)
 		}
+		return
+	}
+	if len(os.Args) > 1 && (os.Args[1] == "version" || os.Args[1] == "--version") {
+		fmt.Println("pglockr", version)
 		return
 	}
 
@@ -140,6 +148,17 @@ func run(configPath string, log *slog.Logger) error {
 	}
 
 	pollerSvc := poller.New(cfg.Cluster.Name, source, storage, cfg.Poll.Interval, log)
+
+	// Prometheus metrics: pglockr's own health/activity (no query texts).
+	met := metrics.New(version,
+		func() (string, bool) {
+			st := pollerSvc.Status()
+			return st.Cluster, st.Connected
+		},
+		storage.Latest,
+	)
+	pollerSvc.SetMetrics(met)
+
 	go pollerSvc.Run(ctx)
 
 	// Audit lookup: the victim's current query from the latest snapshot (already
@@ -153,6 +172,7 @@ func run(configPath string, log *slog.Logger) error {
 		return sess.Query, ok
 	}
 	signalSvc := sig.New(client, lookup, log, auditSink)
+	signalSvc.SetMetrics(met)
 
 	ui, err := web.DistFS()
 	if err != nil {
@@ -172,6 +192,7 @@ func run(configPath string, log *slog.Logger) error {
 		Inspector: client,
 		Audit:     auditSink,
 		Auth:      auth.New(identity),
+		Metrics:   met.Handler(),
 		UI:        ui,
 		Log:       log,
 	})
