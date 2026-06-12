@@ -18,6 +18,11 @@ type Source interface {
 	Snapshot(ctx context.Context) (map[int]graph.Session, map[graph.EdgeKey]graph.LockLabel, error)
 }
 
+// Observer is notified of each poll's outcome (for metrics). Optional.
+type Observer interface {
+	ObservePoll(cluster string, d time.Duration, err error)
+}
+
 // Status is the live health of the poll loop, served to the UI.
 type Status struct {
 	Cluster   string    `json:"cluster"`
@@ -33,10 +38,14 @@ type Poller struct {
 	store    *store.Store
 	interval time.Duration
 	log      *slog.Logger
+	obs      Observer
 
 	mu     sync.RWMutex
 	status Status
 }
+
+// SetMetrics attaches an optional observer for poll metrics. Call before Run.
+func (p *Poller) SetMetrics(o Observer) { p.obs = o }
 
 // New constructs a poller. interval is the base cadence; on errors the loop
 // backs off up to a cap before retrying.
@@ -65,7 +74,11 @@ func (p *Poller) Run(ctx context.Context) {
 
 	for {
 		start := time.Now()
-		if err := p.pollOnce(ctx); err != nil {
+		err := p.pollOnce(ctx)
+		if p.obs != nil {
+			p.obs.ObservePoll(p.cluster, time.Since(start), err)
+		}
+		if err != nil {
 			if ctx.Err() != nil {
 				return
 			}

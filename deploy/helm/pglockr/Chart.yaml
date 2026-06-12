@@ -1,0 +1,13 @@
+apiVersion: v2
+name: pglockr
+description: Live PostgreSQL lock & blocking-tree visualizer (one instance per cluster)
+type: application
+version: 0.1.0
+appVersion: "0.1.0"
+home: https://github.com/rom8726/pglockr
+sources:
+  - https://github.com/rom8726/pglockr
+keywords:
+  - postgresql
+  - locks
+  - observability

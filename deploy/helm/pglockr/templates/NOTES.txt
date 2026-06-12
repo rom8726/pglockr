@@ -1,0 +1,18 @@
+pglockr is deployed for cluster "{{ .Values.cluster.name }}" (auth.mode={{ .Values.auth.mode }}).
+
+Reach the UI/API:
+
+  kubectl -n {{ .Release.Namespace }} port-forward svc/{{ include "pglockr.fullname" . }} {{ .Values.service.port }}:{{ .Values.service.port }}
+  open http://localhost:{{ .Values.service.port }}
+
+{{- if .Values.secret.create }}
+
+WARNING: this release created a Secret from values (DSN/token). For production,
+set secret.existingSecret to a Secret managed outside the chart (External
+Secrets / Vault) and remove the plaintext from values.
+{{- end }}
+{{- if not .Values.persistence.enabled }}
+
+History/audit are in-memory only (lost on pod restart). Set persistence.enabled=true
+to keep them on a PVC.
+{{- end }}

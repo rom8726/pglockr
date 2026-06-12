@@ -8,6 +8,7 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"net/url"
+	"strings"
 	"testing"
 	"testing/fstest"
 	"time"
@@ -78,6 +79,7 @@ func newTestServerWith(t *testing.T, st *store.Store, sig signal.Signaler, insp 
 		Inspector: insp,
 		Audit:     sink,
 		Auth:      auth.New(testIdentity()),
+		Metrics:   http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) { _, _ = w.Write([]byte("# metrics")) }),
 		UI:        fstest.MapFS{"index.html": {Data: []byte("<html>ui</html>")}},
 		Log:       log,
 	})
@@ -416,6 +418,16 @@ func TestAuditBadLimit(t *testing.T) {
 	h.ServeHTTP(rec, authed(http.MethodGet, "/api/audit?limit=zero"))
 	if rec.Code != http.StatusBadRequest {
 		t.Fatalf("got %d, want 400", rec.Code)
+	}
+}
+
+func TestMetricsUnauthenticated(t *testing.T) {
+	h := newTestServer(t, store.New(10), &fakeSignaler{})
+	rec := httptest.NewRecorder()
+	// No token: /metrics is open like /healthz.
+	h.ServeHTTP(rec, httptest.NewRequest(http.MethodGet, "/metrics", nil))
+	if rec.Code != http.StatusOK || !strings.Contains(rec.Body.String(), "# metrics") {
+		t.Fatalf("metrics endpoint: code=%d body=%q", rec.Code, rec.Body.String())
 	}
 }
 
