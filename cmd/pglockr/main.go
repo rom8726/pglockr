@@ -198,9 +198,12 @@ func run(configPath string, log *slog.Logger) error {
 	return nil
 }
 
-// buildIdentity assembles the token identity from config: the legacy single
-// token (admin) plus any named principals.
+// buildIdentity assembles the identity source selected by auth.mode.
 func buildIdentity(cfg config.AuthConfig) (auth.Identity, error) {
+	if cfg.Mode == "proxy" {
+		return buildProxyIdentity(cfg.Proxy)
+	}
+	// token mode: legacy single token (admin) plus any named principals.
 	var entries []auth.TokenPrincipal
 	if cfg.Token != "" {
 		entries = append(entries, auth.TokenPrincipal{Name: "default", Role: auth.RoleAdmin, Token: cfg.Token})
@@ -213,6 +216,35 @@ func buildIdentity(cfg config.AuthConfig) (auth.Identity, error) {
 		entries = append(entries, auth.TokenPrincipal{Name: p.Name, Role: role, Token: p.Token})
 	}
 	return auth.NewTokenIdentity(entries), nil
+}
+
+func buildProxyIdentity(p config.ProxyAuthConfig) (auth.Identity, error) {
+	groupToRole := make(map[string]auth.Role, len(p.RoleMappings))
+	for _, m := range p.RoleMappings {
+		role, err := auth.ParseRole(m.Role)
+		if err != nil {
+			return nil, fmt.Errorf("proxy roleMapping %q: %w", m.Group, err)
+		}
+		groupToRole[m.Group] = role
+	}
+	var defaultRole auth.Role
+	if p.DefaultRole != "" {
+		r, err := auth.ParseRole(p.DefaultRole)
+		if err != nil {
+			return nil, fmt.Errorf("proxy defaultRole: %w", err)
+		}
+		defaultRole = r
+	}
+	return auth.NewProxyIdentity(auth.ProxyConfig{
+		UserHeader:   p.UserHeader,
+		GroupsHeader: p.GroupsHeader,
+		GroupsSep:    p.GroupsSep,
+		TrustMode:    p.TrustMode,
+		SecretHeader: p.SecretHeader,
+		Secret:       p.Secret,
+		DefaultRole:  defaultRole,
+		GroupToRole:  groupToRole,
+	})
 }
 
 // preflight checks the connected role's privileges and, if any are missing,

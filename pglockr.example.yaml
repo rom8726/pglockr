@@ -20,6 +20,10 @@ http:
   addr: ":8080"
 
 auth:
+  # mode: token (default) or proxy (trust an upstream SSO proxy's headers).
+  mode: token
+
+  # --- token mode ---
   # Role-based access. Each principal's token is read from the env var it names
   # in tokenEnv (never stored here). Roles: viewer (read), operator (+ cancel/
   # terminate), admin (+ audit/config). PGLOCKR_TOKEN, if set, is an admin.
@@ -30,6 +34,21 @@ auth:
     - name: dashboard
       role: viewer
       tokenEnv: PGLOCKR_TOKEN_DASHBOARD
+
+  # --- proxy mode (set mode: proxy) ---
+  # Trust identity headers from an upstream auth proxy (oauth2-proxy/Istio).
+  # See dev/sso for a runnable oauth2-proxy + OIDC demo.
+  proxy:
+    trustMode: secret              # "secret" (proxy presents a shared header) or "network"
+    secretEnv: PGLOCKR_PROXY_SECRET
+    secretHeader: X-Pglockr-Proxy-Secret
+    userHeader: X-Forwarded-Email
+    groupsHeader: X-Forwarded-Groups
+    # defaultRole: viewer          # role for an authenticated user with no mapped group
+    roleMappings:
+      - { group: pglockr-admins,  role: admin }
+      - { group: pglockr-ops,     role: operator }
+      - { group: pglockr-viewers, role: viewer }
 
 persist:
   # Durable snapshot history so the scrubber survives restarts. Enabled
