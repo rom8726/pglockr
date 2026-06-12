@@ -4,6 +4,7 @@ import { Forest } from "./Forest";
 import { DetailPanel } from "./DetailPanel";
 import { LocksView } from "./LocksView";
 import { HotObjectsView } from "./HotObjectsView";
+import { AuditView } from "./AuditView";
 import { Scrubber } from "./Scrubber";
 import { Login } from "./Login";
 import { useStream } from "./useStream";
@@ -13,13 +14,15 @@ import { canAct, type Principal, type Snapshot, type SnapshotMeta } from "./type
 
 const CLUSTER = "default";
 
-type View = "forest" | "locks" | "hot";
+type View = "forest" | "locks" | "hot" | "audit";
 
-const TABS: { id: View; label: string }[] = [
+const BASE_TABS: { id: View; label: string }[] = [
   { id: "forest", label: "Blocking forest" },
   { id: "locks", label: "Lock inspector" },
   { id: "hot", label: "Hot objects" },
 ];
+
+const AUDIT_TAB: { id: View; label: string } = { id: "audit", label: "Audit" };
 
 export default function App() {
   const [authed, setAuthed] = useState(() => !!getToken());
@@ -129,7 +132,7 @@ export default function App() {
         <span className="topbar__brand">pglockr</span>
         <span className="topbar__cluster">{CLUSTER}</span>
         <nav className="tabs">
-          {TABS.map((t) => (
+          {(me?.role === "admin" ? [...BASE_TABS, AUDIT_TAB] : BASE_TABS).map((t) => (
             <button
               key={t.id}
               className={`tab ${view === t.id ? "tab--active" : ""}`}
@@ -194,6 +197,7 @@ export default function App() {
 
         {view === "locks" && <LocksView cluster={CLUSTER} />}
         {view === "hot" && <HotObjectsView cluster={CLUSTER} />}
+        {view === "audit" && me?.role === "admin" && <AuditView />}
       </main>
     </div>
   );

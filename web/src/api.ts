@@ -1,4 +1,12 @@
-import type { ActionResult, HotObject, LockRow, Principal, Snapshot, SnapshotMeta } from "./types";
+import type {
+  ActionResult,
+  AuditEntry,
+  HotObject,
+  LockRow,
+  Principal,
+  Snapshot,
+  SnapshotMeta,
+} from "./types";
 
 // The bearer token is kept in localStorage and also mirrored into a cookie so
 // the browser can authenticate the WebSocket upgrade (which cannot set custom
@@ -31,6 +39,11 @@ async function handle<T>(res: Response): Promise<T> {
   if (res.status === 401) throw new AuthError("unauthorized");
   if (!res.ok) throw new Error(await res.text());
   return res.json() as Promise<T>;
+}
+
+export async function fetchAudit(limit = 100): Promise<AuditEntry[]> {
+  const res = await fetch(`/api/audit?limit=${limit}`, { headers: authHeaders() });
+  return handle<AuditEntry[]>(res);
 }
 
 export async function fetchMe(): Promise<Principal> {

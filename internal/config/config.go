@@ -6,6 +6,7 @@ package config
 import (
 	"fmt"
 	"os"
+	"strings"
 	"time"
 
 	"gopkg.in/yaml.v3"
@@ -13,11 +14,19 @@ import (
 
 // Config is the fully resolved runtime configuration.
 type Config struct {
-	Cluster ClusterConfig `yaml:"cluster"`
-	Poll    PollConfig    `yaml:"poll"`
-	HTTP    HTTPConfig    `yaml:"http"`
-	Auth    AuthConfig    `yaml:"auth"`
-	Persist PersistConfig `yaml:"persist"`
+	Cluster   ClusterConfig   `yaml:"cluster"`
+	Poll      PollConfig      `yaml:"poll"`
+	HTTP      HTTPConfig      `yaml:"http"`
+	Auth      AuthConfig      `yaml:"auth"`
+	Persist   PersistConfig   `yaml:"persist"`
+	Redaction RedactionConfig `yaml:"redaction"`
+}
+
+// RedactionConfig controls masking of query texts at ingestion (spec §7).
+// When enabled, literal values in queries are replaced with `?` before a
+// snapshot reaches the ring buffer, persistent history, stream, or audit log.
+type RedactionConfig struct {
+	Enabled bool `yaml:"enabled"`
 }
 
 // PersistConfig controls durable snapshot history (SQLite). Disabled by
@@ -92,6 +101,8 @@ const (
 	// EnvDBPath points at the SQLite history file (a host/volume path); setting
 	// it also enables persistence.
 	EnvDBPath = "PGLOCKR_DB_PATH"
+	// EnvRedact ("1"/"true") enables query-text redaction, overriding YAML.
+	EnvRedact = "PGLOCKR_REDACT"
 )
 
 // Load reads the YAML config at path (if non-empty), applies environment
@@ -130,6 +141,9 @@ func Load(path string) (Config, error) {
 	if v := os.Getenv(EnvDBPath); v != "" {
 		cfg.Persist.Path = v
 		cfg.Persist.Enabled = true
+	}
+	if v := os.Getenv(EnvRedact); v == "1" || strings.EqualFold(v, "true") {
+		cfg.Redaction.Enabled = true
 	}
 
 	// Re-apply defaults for any zeroed durations/sizes after YAML parse.

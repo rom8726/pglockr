@@ -52,6 +52,16 @@ export function canAct(role: Role | undefined): boolean {
   return role === "operator" || role === "admin";
 }
 
+export interface AuditEntry {
+  at: string;
+  actor: string;
+  action: "cancel" | "terminate";
+  pid: number;
+  victimQuery: string;
+  delivered: boolean;
+  error?: string;
+}
+
 export interface SnapshotMeta {
   takenAt: string;
   roots: number;

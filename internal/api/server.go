@@ -12,6 +12,7 @@ import (
 	"github.com/go-chi/chi/v5"
 	"github.com/go-chi/chi/v5/middleware"
 
+	"github.com/rom8726/pglockr/internal/audit"
 	"github.com/rom8726/pglockr/internal/auth"
 	"github.com/rom8726/pglockr/internal/pg"
 	"github.com/rom8726/pglockr/internal/poller"
@@ -33,6 +34,7 @@ type Server struct {
 	poller    *poller.Poller
 	signal    *signal.Service
 	inspector Inspector
+	audit     audit.Sink
 	auth      *auth.Middleware
 	ui        fs.FS
 	log       *slog.Logger
@@ -45,6 +47,7 @@ type Config struct {
 	Poller    *poller.Poller
 	Signal    *signal.Service
 	Inspector Inspector
+	Audit     audit.Sink
 	Auth      *auth.Middleware
 	UI        fs.FS
 	Log       *slog.Logger
@@ -58,6 +61,7 @@ func New(c Config) *Server {
 		poller:    c.Poller,
 		signal:    c.Signal,
 		inspector: c.Inspector,
+		audit:     c.Audit,
 		auth:      c.Auth,
 		ui:        c.UI,
 		log:       c.Log,
@@ -92,6 +96,12 @@ func (s *Server) Handler() http.Handler {
 			act.Use(requireSameOrigin)
 			act.Post("/sessions/{pid}/cancel", s.handleCancel)
 			act.Post("/sessions/{pid}/terminate", s.handleTerminate)
+		})
+
+		// Audit trail: admin only.
+		api.Group(func(adm chi.Router) {
+			adm.Use(auth.RequireRole(auth.RoleAdmin))
+			adm.Get("/audit", s.handleAudit)
 		})
 	})
 

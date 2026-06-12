@@ -34,5 +34,12 @@ auth:
 persist:
   # Durable snapshot history so the scrubber survives restarts. Enabled
   # automatically when PGLOCKR_DB_PATH is set (point it at a mounted volume).
+  # Also makes the audit trail durable.
   enabled: false
   retention: 24h    # prune snapshots older than this (0 = keep forever)
+
+redaction:
+  # Mask literal values in query texts at ingestion (or set PGLOCKR_REDACT=1):
+  # UPDATE t SET email = 'bob@x.io' WHERE id = 42 → UPDATE t SET email = ? WHERE id = ?
+  # Raw texts then never reach the ring buffer, history, stream, or audit log.
+  enabled: false
