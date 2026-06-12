@@ -59,13 +59,35 @@ type HTTPConfig struct {
 	Addr string `yaml:"addr"`
 }
 
-// AuthConfig holds tool authentication. Tokens come from the environment.
+// AuthConfig holds tool authentication. Tokens/secrets come from the
+// environment.
 //
-// Legacy: PGLOCKR_TOKEN is a single admin token (backward compatible). For RBAC,
-// list principals in YAML, each with its token in a named env var.
+// Mode selects the identity source: "token" (default) uses PGLOCKR_TOKEN and/or
+// auth.principals; "proxy" trusts identity headers from an upstream SSO proxy.
 type AuthConfig struct {
+	Mode       string            `yaml:"mode"`
 	Token      string            `yaml:"-"` // legacy single token (env PGLOCKR_TOKEN) → admin
 	Principals []PrincipalConfig `yaml:"principals"`
+	Proxy      ProxyAuthConfig   `yaml:"proxy"`
+}
+
+// ProxyAuthConfig configures the trusted-reverse-proxy identity source.
+type ProxyAuthConfig struct {
+	UserHeader   string              `yaml:"userHeader"`
+	GroupsHeader string              `yaml:"groupsHeader"`
+	GroupsSep    string              `yaml:"groupsDelimiter"`
+	TrustMode    string              `yaml:"trustMode"`    // "secret" | "network"
+	SecretHeader string              `yaml:"secretHeader"` // header the proxy presents
+	SecretEnv    string              `yaml:"secretEnv"`    // env var holding the expected secret
+	Secret       string              `yaml:"-"`            // resolved from SecretEnv
+	DefaultRole  string              `yaml:"defaultRole"`  // role when no group matched
+	RoleMappings []RoleMappingConfig `yaml:"roleMappings"`
+}
+
+// RoleMappingConfig maps an upstream group/claim value to a pglockr role.
+type RoleMappingConfig struct {
+	Group string `yaml:"group"`
+	Role  string `yaml:"role"`
 }
 
 // PrincipalConfig is one named access principal. Its token is read from the
@@ -145,6 +167,33 @@ func Load(path string) (Config, error) {
 	if v := os.Getenv(EnvRedact); v == "1" || strings.EqualFold(v, "true") {
 		cfg.Redaction.Enabled = true
 	}
+	// Resolve the proxy shared secret from its named env var.
+	if env := cfg.Auth.Proxy.SecretEnv; env != "" {
+		cfg.Auth.Proxy.Secret = os.Getenv(env)
+	}
+
+	// Auth + proxy defaults.
+	if cfg.Auth.Mode == "" {
+		cfg.Auth.Mode = "token"
+	}
+	if cfg.Auth.Mode == "proxy" {
+		px := &cfg.Auth.Proxy
+		if px.UserHeader == "" {
+			px.UserHeader = "X-Auth-Request-Email"
+		}
+		if px.GroupsHeader == "" {
+			px.GroupsHeader = "X-Auth-Request-Groups"
+		}
+		if px.GroupsSep == "" {
+			px.GroupsSep = ","
+		}
+		if px.TrustMode == "" {
+			px.TrustMode = "secret"
+		}
+		if px.SecretHeader == "" {
+			px.SecretHeader = "X-Pglockr-Proxy-Secret"
+		}
+	}
 
 	// Re-apply defaults for any zeroed durations/sizes after YAML parse.
 	d := Defaults()
@@ -179,7 +228,25 @@ func (c Config) validate() error {
 	if c.Cluster.DSN == "" {
 		return fmt.Errorf("%s must be set (target database DSN)", EnvDSN)
 	}
-	// Authentication: a legacy single token and/or named principals.
+	switch c.Auth.Mode {
+	case "token":
+		if err := c.validateTokenAuth(); err != nil {
+			return err
+		}
+	case "proxy":
+		if err := c.validateProxyAuth(); err != nil {
+			return err
+		}
+	default:
+		return fmt.Errorf("auth.mode %q invalid (want token|proxy)", c.Auth.Mode)
+	}
+	if c.Persist.Enabled && c.Persist.Path == "" {
+		return fmt.Errorf("persistence enabled but no path set (%s)", EnvDBPath)
+	}
+	return nil
+}
+
+func (c Config) validateTokenAuth() error {
 	if c.Auth.Token == "" && len(c.Auth.Principals) == 0 {
 		return fmt.Errorf("no auth configured: set %s or define auth.principals", EnvToken)
 	}
@@ -197,8 +264,34 @@ func (c Config) validate() error {
 			return fmt.Errorf("auth.principals[%d] (%s): env %s is empty", i, p.Name, p.TokenEnv)
 		}
 	}
-	if c.Persist.Enabled && c.Persist.Path == "" {
-		return fmt.Errorf("persistence enabled but no path set (%s)", EnvDBPath)
+	return nil
+}
+
+func (c Config) validateProxyAuth() error {
+	px := c.Auth.Proxy
+	switch px.TrustMode {
+	case "secret":
+		if px.SecretEnv == "" {
+			return fmt.Errorf("auth.proxy: trustMode 'secret' requires secretEnv")
+		}
+		if px.Secret == "" {
+			return fmt.Errorf("auth.proxy: env %s (secret) is empty", px.SecretEnv)
+		}
+	case "network":
+		// trusted by network isolation
+	default:
+		return fmt.Errorf("auth.proxy.trustMode %q invalid (want secret|network)", px.TrustMode)
+	}
+	if len(px.RoleMappings) == 0 && px.DefaultRole == "" {
+		return fmt.Errorf("auth.proxy: define roleMappings or a defaultRole")
+	}
+	for i, m := range px.RoleMappings {
+		if m.Group == "" || !validRoles[m.Role] {
+			return fmt.Errorf("auth.proxy.roleMappings[%d]: need group and a valid role, got group=%q role=%q", i, m.Group, m.Role)
+		}
+	}
+	if px.DefaultRole != "" && !validRoles[px.DefaultRole] {
+		return fmt.Errorf("auth.proxy.defaultRole %q invalid", px.DefaultRole)
 	}
 	return nil
 }

@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useState } from "react";
 import { ReactFlowProvider } from "@xyflow/react";
 import { Forest } from "./Forest";
 import { DetailPanel } from "./DetailPanel";
@@ -9,7 +9,7 @@ import { Scrubber } from "./Scrubber";
 import { Login } from "./Login";
 import { useStream } from "./useStream";
 import { usePolled } from "./usePolled";
-import { clearToken, fetchHistory, fetchMe, fetchSnapshot, getToken } from "./api";
+import { AuthError, clearToken, fetchHistory, fetchMe, fetchSnapshot, getToken } from "./api";
 import { canAct, type Principal, type Snapshot, type SnapshotMeta } from "./types";
 
 const CLUSTER = "default";
@@ -24,11 +24,34 @@ const BASE_TABS: { id: View; label: string }[] = [
 
 const AUDIT_TAB: { id: View; label: string } = { id: "audit", label: "Audit" };
 
+type AuthState = "checking" | "needauth" | "authed";
+
 export default function App() {
-  const [authed, setAuthed] = useState(() => !!getToken());
+  // Auth is detected by calling /api/me: it succeeds in token mode (cookie set)
+  // and in proxy mode (the SSO proxy injects identity headers), so no login form
+  // is shown behind a proxy. A 401 means we need a token (token mode).
+  const [authState, setAuthState] = useState<AuthState>("checking");
   const [me, setMe] = useState<Principal | null>(null);
+  const authed = authState === "authed";
   const [view, setView] = useState<View>("forest");
   const [selectedPid, setSelectedPid] = useState<number | null>(null);
+
+  const checkAuth = useCallback(() => {
+    setAuthState("checking");
+    fetchMe()
+      .then((p) => {
+        setMe(p);
+        setAuthState("authed");
+      })
+      .catch((e) => {
+        setMe(null);
+        setAuthState(e instanceof AuthError ? "needauth" : "needauth");
+      });
+  }, []);
+
+  useEffect(() => {
+    checkAuth();
+  }, [checkAuth]);
 
   const { snapshot: live, state } = useStream(CLUSTER, authed);
   const [liveSnapshot, setLiveSnapshot] = useState<Snapshot | null>(null);
@@ -46,17 +69,6 @@ export default function App() {
 
   const n = metas?.length ?? 0;
   const effectiveIndex = paused ? Math.min(index, Math.max(0, n - 1)) : Math.max(0, n - 1);
-
-  // Resolve the authenticated principal (name + role) for the UI.
-  useEffect(() => {
-    if (!authed) {
-      setMe(null);
-      return;
-    }
-    fetchMe()
-      .then(setMe)
-      .catch(() => {});
-  }, [authed]);
 
   // Seed with a REST snapshot before the first WebSocket frame.
   useEffect(() => {
@@ -99,9 +111,16 @@ export default function App() {
     }
   }, [playing, paused, index, n]);
 
-  if (!authed) {
-    return <Login onAuthed={() => setAuthed(true)} />;
+  if (authState === "checking") {
+    return <div className="login"><div className="tab-msg">Connecting…</div></div>;
   }
+  if (authState === "needauth") {
+    return <Login onAuthed={checkAuth} />;
+  }
+
+  // Proxy mode: authenticated without a local token (the SSO proxy handles it),
+  // so there's no token-based sign-out to offer here.
+  const proxyMode = !getToken();
 
   const displayed = paused ? histSnapshot : liveSnapshot;
   const rootCount = displayed?.roots?.length ?? 0;
@@ -155,16 +174,17 @@ export default function App() {
             {me.name} <span className={`rolebadge rolebadge--${me.role}`}>{me.role}</span>
           </span>
         )}
-        <button
-          className="btn btn--ghost"
-          onClick={() => {
-            clearToken();
-            setMe(null);
-            setAuthed(false);
-          }}
-        >
-          Sign out
-        </button>
+        {!proxyMode && (
+          <button
+            className="btn btn--ghost"
+            onClick={() => {
+              clearToken();
+              checkAuth();
+            }}
+          >
+            Sign out
+          </button>
+        )}
       </header>
 
       <main className="main">

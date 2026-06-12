@@ -65,8 +65,31 @@ auth:
 
 `PGLOCKR_TOKEN`, if set, is a single **admin** token (backward compatible). The
 UI is role-aware (viewers don't see cancel/terminate) and `GET /api/me` returns
-the current principal. The `Identity` layer is pluggable — a trusted SSO-proxy
-mode (offload auth to oauth2-proxy/Istio) is the planned next source.
+the current principal.
+
+**SSO via a trusted proxy** (`auth.mode: proxy`) — offload authentication to an
+upstream proxy (oauth2-proxy/Istio/Pomerium) that injects the user + groups as
+headers; pglockr maps groups to roles:
+
+```yaml
+auth:
+  mode: proxy
+  proxy:
+    trustMode: secret          # require a shared-secret header (forgery-proof);
+                               # or "network" when pglockr is reachable only via the proxy
+    secretEnv: PGLOCKR_PROXY_SECRET
+    userHeader: X-Forwarded-Email
+    groupsHeader: X-Forwarded-Groups
+    roleMappings:
+      - { group: pglockr-admins, role: admin }
+      - { group: pglockr-ops,    role: operator }
+      - { group: pglockr-viewers, role: viewer }
+```
+
+With `trustMode: secret`, identity headers are ignored unless the proxy presents
+the shared secret, so a client reaching pglockr directly can't forge identity.
+A runnable oauth2-proxy + OIDC demo is in [dev/sso/](dev/sso/README.md). In proxy
+mode the UI shows no login form — the proxy has already authenticated.
 
 ### Audit trail
 

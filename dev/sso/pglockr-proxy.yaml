@@ -1,0 +1,23 @@
+# pglockr config for the SSO demo: trust identity headers from the oauth2-proxy
+# in front. trustMode "network" because oauth2-proxy can't inject a static
+# secret header — in this demo pglockr listens on :8111 and the proxy is the
+# intended ingress. In production, network-isolate pglockr so only the proxy can
+# reach it (or use a proxy that can inject a secret header and trustMode secret).
+cluster:
+  name: default
+
+auth:
+  mode: proxy
+  proxy:
+    trustMode: network
+    # oauth2-proxy in reverse-proxy mode passes identity via X-Forwarded-* with
+    # --pass-user-headers (X-Auth-Request-* are response headers for nginx
+    # auth_request mode instead).
+    userHeader: X-Forwarded-Email
+    groupsHeader: X-Forwarded-Groups
+    roleMappings:
+      - { group: pglockr-admins,  role: admin }
+      - { group: pglockr-ops,     role: operator }
+      - { group: pglockr-viewers, role: viewer }
+    # Optional: a role for any authenticated user without a pglockr group.
+    # defaultRole: viewer
