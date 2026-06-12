@@ -65,7 +65,12 @@ func Open(path string, retention time.Duration, log *slog.Logger) (*SQLite, erro
 		return nil, fmt.Errorf("init schema: %w", err)
 	}
 
-	return &SQLite{db: db, retention: retention, log: log}, nil
+	s := &SQLite{db: db, retention: retention, log: log}
+	if err := s.initAudit(ctx); err != nil {
+		db.Close()
+		return nil, fmt.Errorf("init audit schema: %w", err)
+	}
+	return s, nil
 }
 
 // Close releases the database.

@@ -16,11 +16,13 @@ import (
 	"time"
 
 	"github.com/rom8726/pglockr/internal/api"
+	"github.com/rom8726/pglockr/internal/audit"
 	"github.com/rom8726/pglockr/internal/auth"
 	"github.com/rom8726/pglockr/internal/config"
 	"github.com/rom8726/pglockr/internal/persist"
 	"github.com/rom8726/pglockr/internal/pg"
 	"github.com/rom8726/pglockr/internal/poller"
+	"github.com/rom8726/pglockr/internal/redact"
 	"github.com/rom8726/pglockr/internal/setup"
 	sig "github.com/rom8726/pglockr/internal/signal"
 	"github.com/rom8726/pglockr/internal/store"
@@ -112,6 +114,10 @@ func run(configPath string, log *slog.Logger) error {
 
 	storage := store.New(cfg.Poll.RingSize)
 
+	// Audit sink: durable (SQLite, shared with history) when persistence is on,
+	// otherwise a bounded in-memory trail.
+	var auditSink audit.Sink = audit.NewMemory(1000)
+
 	// Optional durable history so the scrubber survives restarts (spec 5.9).
 	if cfg.Persist.Enabled {
 		hist, err := persist.Open(cfg.Persist.Path, cfg.Persist.Retention, log)
@@ -120,14 +126,24 @@ func run(configPath string, log *slog.Logger) error {
 		}
 		defer hist.Close()
 		storage.SetPersister(hist, log)
+		auditSink = hist
 		log.Info("history persistence enabled",
 			"path", cfg.Persist.Path, "retention", cfg.Persist.Retention)
 	}
 
-	pollerSvc := poller.New(cfg.Cluster.Name, client, storage, cfg.Poll.Interval, log)
+	// Redaction: mask literal values in query texts at ingestion, so raw texts
+	// never reach the ring, history, stream, or audit (spec §7).
+	var source poller.Source = client
+	if cfg.Redaction.Enabled {
+		source = redact.NewSource(client)
+		log.Info("query-text redaction enabled")
+	}
+
+	pollerSvc := poller.New(cfg.Cluster.Name, source, storage, cfg.Poll.Interval, log)
 	go pollerSvc.Run(ctx)
 
-	// Audit lookup: the victim's current query from the latest snapshot.
+	// Audit lookup: the victim's current query from the latest snapshot (already
+	// redacted when redaction is enabled).
 	lookup := func(pid int) (string, bool) {
 		snap, ok := storage.Latest()
 		if !ok {
@@ -136,7 +152,7 @@ func run(configPath string, log *slog.Logger) error {
 		sess, ok := snap.Sessions[pid]
 		return sess.Query, ok
 	}
-	signalSvc := sig.New(client, lookup, log)
+	signalSvc := sig.New(client, lookup, log, auditSink)
 
 	ui, err := web.DistFS()
 	if err != nil {
@@ -154,6 +170,7 @@ func run(configPath string, log *slog.Logger) error {
 		Poller:    pollerSvc,
 		Signal:    signalSvc,
 		Inspector: client,
+		Audit:     auditSink,
 		Auth:      auth.New(identity),
 		UI:        ui,
 		Log:       log,

@@ -98,6 +98,26 @@ func parseOptTime(v string) (time.Time, error) {
 	return time.Parse(time.RFC3339, v)
 }
 
+// handleAudit returns the most recent audit entries (admin only; gated by
+// RequireRole in the router). ?limit caps the count (default 100, max 1000).
+func (s *Server) handleAudit(w http.ResponseWriter, r *http.Request) {
+	limit := 100
+	if v := r.URL.Query().Get("limit"); v != "" {
+		n, err := strconv.Atoi(v)
+		if err != nil || n < 1 {
+			http.Error(w, "invalid 'limit'", http.StatusBadRequest)
+			return
+		}
+		limit = n
+	}
+	entries, err := s.audit.Recent(limit)
+	if err != nil {
+		http.Error(w, err.Error(), http.StatusInternalServerError)
+		return
+	}
+	writeJSON(w, http.StatusOK, entries)
+}
+
 func (s *Server) handleLocks(w http.ResponseWriter, r *http.Request) {
 	rows, err := s.inspector.Locks(r.Context())
 	if err != nil {

@@ -205,6 +205,16 @@ body {
   color: var(--warn);
   border-color: var(--warn);
 }
+.pill--danger {
+  color: var(--danger);
+  border-color: var(--danger);
+}
+.tbl__query {
+  max-width: 420px;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
 .bar {
   height: 8px;
   width: 160px;

@@ -7,6 +7,8 @@ import (
 	"context"
 	"log/slog"
 	"time"
+
+	"github.com/rom8726/pglockr/internal/audit"
 )
 
 // Action names the kind of signal sent to a backend.
@@ -32,11 +34,13 @@ type Service struct {
 	sig    Signaler
 	lookup QueryLookup
 	log    *slog.Logger
+	sink   audit.Sink
 }
 
-// New constructs the signal service. lookup may be nil.
-func New(sig Signaler, lookup QueryLookup, log *slog.Logger) *Service {
-	return &Service{sig: sig, lookup: lookup, log: log}
+// New constructs the signal service. lookup and sink may be nil; with a nil
+// sink the audit trail exists only in the structured log.
+func New(sig Signaler, lookup QueryLookup, log *slog.Logger, sink audit.Sink) *Service {
+	return &Service{sig: sig, lookup: lookup, log: log, sink: sink}
 }
 
 // Result reports the outcome of a signal attempt.
@@ -67,6 +71,23 @@ func (s *Service) Do(ctx context.Context, action Action, pid int, actor string) 
 
 	at := time.Now()
 	// Immutable audit trail: who, when, which PID, the victim's query, result.
+	entry := audit.Entry{
+		At:          at,
+		Actor:       actor,
+		Action:      string(action),
+		PID:         pid,
+		VictimQuery: victimQuery,
+		Delivered:   delivered && err == nil,
+	}
+	if err != nil {
+		entry.Error = err.Error()
+	}
+	if s.sink != nil {
+		if rerr := s.sink.Record(entry); rerr != nil {
+			s.log.Error("audit sink write failed", "err", rerr)
+		}
+	}
+
 	attrs := []any{
 		"audit", true,
 		"action", string(action),

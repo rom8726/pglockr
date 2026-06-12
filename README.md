@@ -68,6 +68,23 @@ UI is role-aware (viewers don't see cancel/terminate) and `GET /api/me` returns
 the current principal. The `Identity` layer is pluggable — a trusted SSO-proxy
 mode (offload auth to oauth2-proxy/Istio) is the planned next source.
 
+### Audit trail
+
+Every cancel/terminate is recorded with its principal, target PID, the victim's
+query, and the outcome. With SQLite persistence enabled the trail is durable
+(survives restarts) and intentionally exempt from history retention pruning;
+without it, the last 1000 entries are kept in memory. Admins can read it via
+`GET /api/audit` or the **Audit** tab.
+
+### Query-text redaction
+
+pglockr reads other backends' query texts, which often contain sensitive values.
+Set `redaction.enabled: true` (or `PGLOCKR_REDACT=1`) to mask literals at
+ingestion — `UPDATE accounts SET email = 'bob@x.io' WHERE id = 42` becomes
+`UPDATE accounts SET email = ? WHERE id = ?`. Masking happens before a snapshot
+reaches the ring buffer, persistent history, the live stream, or the audit log,
+so raw texts never leave the database.
+
 ## History persistence
 
 By default snapshot history lives only in an in-memory ring buffer (~5 min),
@@ -119,6 +136,7 @@ fix it — it still runs (degraded) so you can see what to grant.
 | GET  | `/api/hot-objects?cluster=NAME` | viewer | most contended relations |
 | POST | `/api/sessions/{pid}/cancel` | operator | `pg_cancel_backend` |
 | POST | `/api/sessions/{pid}/terminate` | operator | `pg_terminate_backend` |
+| GET  | `/api/audit?limit=N` | admin | recent actions, newest first |
 
 ## Project layout
 
@@ -128,7 +146,9 @@ internal/config  YAML + env config
 internal/pg      version-aware queries, cancel/terminate
 internal/graph   wait-for forest builder
 internal/store   in-memory ring buffer + pub/sub
-internal/persist SQLite durable history (optional)
+internal/persist SQLite durable history + audit (optional)
+internal/audit   action trail types + in-memory sink
+internal/redact  SQL literal masking (ingestion-time redaction)
 internal/poller  snapshot loop with backoff
 internal/signal  audited actions
 internal/auth    static-token middleware

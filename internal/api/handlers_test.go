@@ -12,6 +12,7 @@ import (
 	"testing/fstest"
 	"time"
 
+	"github.com/rom8726/pglockr/internal/audit"
 	"github.com/rom8726/pglockr/internal/auth"
 	"github.com/rom8726/pglockr/internal/graph"
 	"github.com/rom8726/pglockr/internal/pg"
@@ -66,14 +67,16 @@ func newTestServer(t *testing.T, st *store.Store, sig signal.Signaler) http.Hand
 func newTestServerWith(t *testing.T, st *store.Store, sig signal.Signaler, insp Inspector) http.Handler {
 	t.Helper()
 	log := slog.New(slog.NewTextHandler(io.Discard, nil))
+	sink := audit.NewMemory(100)
 	// A poller that never runs; we only read its Status().
 	p := poller.New("default", nil, st, time.Second, log)
 	srv := New(Config{
 		Cluster:   "default",
 		Store:     st,
 		Poller:    p,
-		Signal:    signal.New(sig, nil, log),
+		Signal:    signal.New(sig, nil, log, sink),
 		Inspector: insp,
+		Audit:     sink,
 		Auth:      auth.New(testIdentity()),
 		UI:        fstest.MapFS{"index.html": {Data: []byte("<html>ui</html>")}},
 		Log:       log,
@@ -365,6 +368,54 @@ func TestHotObjectsEndpoint(t *testing.T) {
 	}
 	if len(got) != 1 || got[0].Waiters != 3 {
 		t.Fatalf("unexpected hot-objects payload: %+v", got)
+	}
+}
+
+func TestAuditAdminOnlyAndRecordsActions(t *testing.T) {
+	sig := &fakeSignaler{delivered: true}
+	h := newTestServer(t, store.New(10), sig)
+
+	// Operator performs an action; it must land in the audit trail.
+	rec := httptest.NewRecorder()
+	h.ServeHTTP(rec, authedAs(http.MethodPost, "/api/sessions/55/terminate", operatorTok))
+	if rec.Code != http.StatusOK {
+		t.Fatalf("terminate = %d, want 200", rec.Code)
+	}
+
+	// viewer and operator are forbidden from reading the audit.
+	for _, tok := range []string{viewerToken, operatorTok} {
+		rec = httptest.NewRecorder()
+		h.ServeHTTP(rec, authedAs(http.MethodGet, "/api/audit", tok))
+		if rec.Code != http.StatusForbidden {
+			t.Fatalf("audit with %q = %d, want 403", tok, rec.Code)
+		}
+	}
+
+	// admin sees the recorded entry, attributed to the operator principal.
+	rec = httptest.NewRecorder()
+	h.ServeHTTP(rec, authed(http.MethodGet, "/api/audit"))
+	if rec.Code != http.StatusOK {
+		t.Fatalf("audit as admin = %d, want 200", rec.Code)
+	}
+	var entries []audit.Entry
+	if err := json.Unmarshal(rec.Body.Bytes(), &entries); err != nil {
+		t.Fatalf("decode: %v", err)
+	}
+	if len(entries) != 1 {
+		t.Fatalf("want 1 audit entry, got %d", len(entries))
+	}
+	e := entries[0]
+	if e.Actor != "olga" || e.Action != "terminate" || e.PID != 55 || !e.Delivered {
+		t.Fatalf("audit entry wrong: %+v", e)
+	}
+}
+
+func TestAuditBadLimit(t *testing.T) {
+	h := newTestServer(t, store.New(10), &fakeSignaler{})
+	rec := httptest.NewRecorder()
+	h.ServeHTTP(rec, authed(http.MethodGet, "/api/audit?limit=zero"))
+	if rec.Code != http.StatusBadRequest {
+		t.Fatalf("got %d, want 400", rec.Code)
 	}
 }
 

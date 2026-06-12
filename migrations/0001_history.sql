@@ -14,3 +14,16 @@ CREATE TABLE IF NOT EXISTS snapshots (
 );
 
 CREATE INDEX IF NOT EXISTS idx_snapshots_taken_at ON snapshots(taken_at);
+
+-- Audit trail (immutable; not subject to history retention pruning).
+CREATE TABLE IF NOT EXISTS audit (
+    id           INTEGER PRIMARY KEY AUTOINCREMENT,
+    at           INTEGER NOT NULL,   -- unix nanoseconds
+    actor        TEXT    NOT NULL,
+    action       TEXT    NOT NULL,
+    pid          INTEGER NOT NULL,
+    victim_query TEXT    NOT NULL,
+    delivered    INTEGER NOT NULL,
+    error        TEXT    NOT NULL DEFAULT ''
+);
+CREATE INDEX IF NOT EXISTS idx_audit_at ON audit(at);
